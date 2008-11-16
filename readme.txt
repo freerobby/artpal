@@ -1,4 +1,4 @@
-=== Plugin Name ===
+=== ArtPal ===
 Contributors: freerobby
 Donate link: http://www.freerobby.com/donate
 Tags: paypal, ecommerce, artists, sell
