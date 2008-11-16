@@ -8,7 +8,7 @@ Description: ArtPal allows artists to use Wordpress to sell their work through P
 
 Author: Robby Grossman
 
-Version: 1.1
+Version: 1.1.1
 
 Author URI: http://www.freerobby.com
 */
@@ -204,18 +204,22 @@ function ds_ap_constructbuynow () {
 }
 
 // Process IPN request
-function ds_ap_doipn () {
-//	$myFile = "./ipnoutput.txt";
-//	$fh = fopen($myFile, 'w');
-//	fwrite ( $fh, "--------------------------------------------------\n" );
-//	fwrite ( $fh, "Begin Instant Payment Notification\n" );
+function ds_ap_doipn ($logging = false) {
+	if ($logging) {
+		$myFile = "./ipnoutput.txt";
+		$fh = fopen($myFile, 'w');
+		fwrite ( $fh, "--------------------------------------------------\n" );
+		fwrite ( $fh, "Begin Instant Payment Notification\n" );
+	}
 	// read the post from PayPal system and add 'cmd'
 	$req = 'cmd=_notify-validate';
 	// Get each element of IPN request
 	foreach ($_POST as $key => $value) {
 		$value = urlencode(stripslashes($value));
 		$req .= "&$key=$value";
-//		fwrite ( $fh, "$key = $value \n" );
+		if ($logging) {
+			fwrite ( $fh, "$key = $value \n" );
+		}
 	}
 	// post back to PayPal system to validate
 	$header .= "POST /cgi-bin/webscr HTTP/1.0\r\n";
@@ -233,21 +237,29 @@ function ds_ap_doipn () {
 	$payer_email = $_POST['payer_email'];
 	
 	if (!$fp) {
-//		fwrite ( $fh, "HTTP ERROR\n" );
+		if ($logging) {
+			fwrite ( $fh, "HTTP ERROR\n" );
+		}
 		// HTTP ERROR
 	}
 	else {
-//		fwrite ( $fh, "NO HTTP ERROR\n" );
+		if ($logging) {
+			fwrite ( $fh, "NO HTTP ERROR\n" );
+		}
 		fputs ($fp, $header . $req);
 		while (!feof($fp)) {
 			$res = fgets ($fp, 1024);
 			if (strcmp ($res, "VERIFIED") == 0) {
-//				fwrite ( $fh, "VERIFIED = 0\n" );
+				if ($logging) {
+					fwrite ( $fh, "VERIFIED = 0\n" );
+				}
 				// check the payment_status is Completed
 				// check that txn_id has not been previously processed
 				// check that receiver_email is your Primary PayPal email
 				if ( strtolower ( urldecode ( $receiver_email ) ) != strtolower ( get_option ( 'ds_ap_paypalemail' ) ) ) {
-//					fwrite ( $fh, "RECEIVER EMAILS DONT MATCH\n" );
+					if ($logging) {
+						fwrite ( $fh, "RECEIVER EMAILS DONT MATCH\n" );
+					}
 					exit;
 				}
 				// check that payment_amount/payment_currency are correct
@@ -256,9 +268,13 @@ function ds_ap_doipn () {
 				$post_id = $item_number;
 				$old_cat = get_option ( 'ds_ap_unsoldcategory' );
 				$new_cat = get_option ( 'ds_ap_soldcategory' );
-//				fwrite ( $fh, "Changing Category of Post $post_id from $old_cat to $new_cat..." );
+				if ($logging) {
+					fwrite ( $fh, "Changing Category of Post $post_id from $old_cat to $new_cat..." );
+				}
 				ds_ap_change_taxonomy_of_object ( $post_id, $old_cat, $new_cat );
-//				fwrite ( $fh, "done\n" );
+				if ($logging) {
+					fwrite ( $fh, "done\n" );
+				}
 				// Flush the cache on the item in question.
 				if (defined('WP_CACHE') && WP_CACHE == true) {
 					wp_cache_no_postid($item_number);
@@ -266,8 +282,10 @@ function ds_ap_doipn () {
 				
 			}
 			else if (strcmp ($res, "INVALID") == 0) {
-//				fwrite ( $fh, "INVALID = 0\n" );
-			// log for manual investigation
+				if ($logging) {
+					fwrite ( $fh, "INVALID = 0\n" );
+				}
+				// log for manual investigation
 				echo stripslashes ( get_option ( 'ds_ap_suspiciousactivitymsg' ) );
 				echo '<br />';
 				echo '<a href="' . get_option ( 'siteurl' ) . '">Click to return to my site.</a><br />';
@@ -275,9 +293,11 @@ function ds_ap_doipn () {
 		}
 		fclose ($fp);
 	}
-//	fwrite ( $fh, "End Instant Payment Notification\n" );
-//	fwrite ( $fh, "--------------------------------------------------\n" );
-//	fclose ( $fh );
+	if ($logging) {
+		fwrite ( $fh, "End Instant Payment Notification\n" );
+		fwrite ( $fh, "--------------------------------------------------\n" );
+		fclose ( $fh );
+	}
 	$item_number = $_GET [ 'itempurchased' ];
 	return '';
 }
@@ -345,38 +365,44 @@ function ds_ap_options_page () {
 	include  ( 'artpal-options.php' );
 }
 
+// Determine if content has ipninsert
+function ds_ap_hasipninsert ($content) {
+	$pos = strpos ($content, ds_ap_TAGINSERT);
+	if ($pos !== false)
+		return true;
+	else
+		return false;
+}
+
+function ds_ap_hasipnpage ($content) {
+	$pos = strpos ($content, ds_ap_TAGIPN);
+	if ($pos !== false)
+		return true;
+	else
+		return false;
+}
+
 // Break into: pre-tag, tag, post-tag
 function ds_ap_parsecontent ( $content ) {
-	// Find start of tag
-	while ( $tag_startpos = strpos ( $content, ds_ap_TAGINSERT ) ) {
-		// If no tag, return original content.
-		if ( ! $tag_startpos ) {
-			// Look for IPN tag to see if this is an IPN request
-			$tag_startpos = strpos ( $content, ds_ap_TAGIPN );
-			if ( $tag_startpos ) {
-				// Do IPN
-				$newcontent_tag = ds_ap_doipn ();
-				// Remove the IPN tag.
-				$tag_endpos = $tag_startpos + strlen ( ds_ap_TAGIPN );
-				$content_pre = substr ( $content, 0, $tag_startpos );
-				$content_post = substr ( $content, $tag_endpos );
-				$content = $content_pre . $newcontent_tag . $content_post;
-			}
-			// Return original content
-			return $content;
-		}
-		// Find end of tag
-		$tag_endpos = $tag_startpos + strlen ( ds_ap_TAGIPN );
-		// Pre = all content before tag
-		$content_pre = substr ( $content, 0, $tag_startpos );
-		// Post = all content after tag
-		$content_post = substr ( $content, $tag_endpos - 1 );
-		
-		// Process the tag
+	// Find start of [artpal=insert] tag
+	$tag_startpos = strpos ( $content, ds_ap_TAGINSERT );
+	if ( $tag_startpos !== false ) {
+		$tag_endpos = $tag_startpos + strlen ( ds_ap_TAGINSERT );
+		$content_pre = substr ( $content, 0, $tag_startpos ); // all content before tag
+		$content_post = substr ( $content, $tag_endpos ); // all content after tag
 		$newcontent_tag = ds_ap_constructbuynow ( );
-		
-		// Return pre-tag, processed tag, post-tag
 		$content = $content_pre . $newcontent_tag . $content_post;
+	}
+	// Find start of [artpal=ipnpage] tag
+	else {
+		$tag_startpos = strpos ( $content, ds_ap_TAGIPN );
+		if ( $tag_startpos !== false ) {
+			$tag_endpos = $tag_startpos + strlen ( ds_ap_TAGIPN );
+			$content_pre = substr ( $content, 0, $tag_startpos );
+			$content_post = substr ( $content, $tag_endpos );
+			$newcontent_tag = ds_ap_doipn ();
+			$content = $content_pre . $newcontent_tag . $content_post;
+		}
 	}
 	return $content;
 }
