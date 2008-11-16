@@ -365,23 +365,6 @@ function ds_ap_options_page () {
 	include  ( 'artpal-options.php' );
 }
 
-// Determine if content has ipninsert
-function ds_ap_hasipninsert ($content) {
-	$pos = strpos ($content, ds_ap_TAGINSERT);
-	if ($pos !== false)
-		return true;
-	else
-		return false;
-}
-
-function ds_ap_hasipnpage ($content) {
-	$pos = strpos ($content, ds_ap_TAGIPN);
-	if ($pos !== false)
-		return true;
-	else
-		return false;
-}
-
 // Break into: pre-tag, tag, post-tag
 function ds_ap_parsecontent ( $content ) {
 	// Find start of [artpal=insert] tag
