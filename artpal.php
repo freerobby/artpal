@@ -8,10 +8,21 @@ Description: ArtPal allows artists to use Wordpress to sell their work through P
 
 Author: Robby Grossman
 
-Version: 1.1.2
+Version: 1.2
 
 Author URI: http://www.freerobby.com
 */
+
+////////////////////////
+// PHP4 Compatibility //
+////////////////////////
+// Part 1: Create htmlspecialchars_decode () in php4
+if (!function_exists("htmlspecialchars_decode")) {
+    function htmlspecialchars_decode($string, $quote_style = ENT_COMPAT) {
+        return strtr($string, array_flip(get_html_translation_table(HTML_SPECIALCHARS, $quote_style)));
+    }
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Dependences
