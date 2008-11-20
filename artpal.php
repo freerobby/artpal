@@ -56,6 +56,27 @@ add_filter ( 'the_content', 'ds_ap_parsecontent' ) ;
 // Plugin Options Definitions
 ////////////////////////////////////////////////////////////////////////////////
 
+global $artpal_currencycodes;
+// English spelling, ISO 4217 code, symbol
+$artpal_currencycodes = array(
+	array('Australian Dollar', 'AUD', '$'),
+	array('Canadian Dollar', 'CAD', '$'),
+	array('Swiss Franc', 'CHF', '&#8355;'),
+	array('Czech Koruna', 'CZK', 'K&#269;'),
+	array('Danish Krone', 'DKK'),
+	array('Euro', 'EUR', '&euro;'),
+	array('Pound Sterling', 'GBP', '&pound;'),
+	array('Hong Kong Dollar', 'HKD', '$'),
+	array('Hungarian Forint', 'HUF', 'Ft'),
+	array('Japanese Yen', 'JPY', '&yen;'),
+	array('Norwegian Krone', 'NOK', 'kr'),
+	array('New Zealand Dollar', 'NZD', '$'),
+	array('Polish Zloty', 'PLN', 'pln'),
+	array('Swedish Krona', 'SEK', 'kr'),
+	array('Singapore Dollar', 'SGD', '$'),
+	array('U.S. Dollar', 'USD', '$')
+);
+
 // Option keys
 global $ds_ap_options_names;
 $ds_ap_options_names = array (
@@ -72,7 +93,9 @@ $ds_ap_options_names = array (
 	'ds_ap_disableecommerce',
 	'ds_ap_textifunknownmetadata',
 	'ds_ap_saledisabledcategory',
-	'ds_ap_textifsaledisabled'
+	'ds_ap_textifsaledisabled',
+	'ds_ap_currencycode4217',
+	'ds_ap_currencysymbol'
 	);
 
 global $ds_ap_options_vals;
@@ -90,7 +113,9 @@ $ds_ap_options_vals = array (
 	'0',
 	stripslashes('Please contact me if you are interested in purchasing this piece.'),
 	'-1',
-	stripslashes('Sorry, this item is not currently available for sale. Please check back later.')
+	stripslashes('Sorry, this item is not currently available for sale. Please check back later.'),
+	$artpal_currencycodes[15][1], // USD
+	$artpal_currencycodes[15][1] // $
 );
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -315,20 +340,21 @@ function ds_ap_doipn ($logging = false) {
 
 // Generate a PayPal button to purchase a particular item
 function ds_ap_generatepaypalbutton ( $selleremail, $itemname, $itemnumber, $price, $shipping, $regularprice = NULL) {
+	$cSymbol = get_option('ds_ap_currencysymbol');
 	if ( $regularprice == $price )
 		$regularprice = NULL;
 	$pretext = htmlspecialchars_decode ( stripslashes ( get_option ( 'ds_ap_prebuttontext' ) ) );
-	$pricetext = '$' . $price;
+	$pricetext = $cSymbol . $price;
 	// If regular price isn't the same as the current price, ...
 	if ( $regularprice != NULL ) {
 		// ... show the savings!
-		$pricetext = '<del>$' . $regularprice . '</del> ' . $pricetext;
+		$pricetext = '<del>' . $cSymbol . $regularprice . '</del> ' . $pricetext;
 	}
 	$pretext = str_replace ( '_PRICE_', $pricetext, $pretext );
 	if ( $shipping == 0 )
 		$shipping = 'free';
 	else
-		$shipping = '$' . $shipping;
+		$shipping = $cSymbol . $shipping;
 	$pretext = str_replace ( '_SHIPPING_', $shipping, $pretext );
 	if ( $shipping == 'free' )
 		$shipping = 0;
@@ -344,7 +370,7 @@ function ds_ap_generatepaypalbutton ( $selleremail, $itemname, $itemnumber, $pri
 																			// be careful! if you uncomment the above line, you can't "reset" sold 
 																			// paintings to make them available again!
 		. '<input type="hidden" name="amount" value="' . $price . '">' // price of item
-		. '<input type="hidden" name="currency_code" value="USD">' // us dollars only
+		. '<input type="hidden" name="currency_code" value="' . get_option('ds_ap_currencycode4217') . '>' // us dollars only
 		. '<input type="hidden" name="quantity" value="1">' // default 1 item
 		. '<input type="hidden" name="shipping" value="' . $shipping . '">' // shipping price of item
 		. '<input type="hidden" name="notify_url" value="' . get_option ( 'ds_ap_ipnpage' ) . '">'

@@ -30,7 +30,9 @@ if ( isset ( $_POST [ 'submitted' ] ) ) {
 	update_option ( 'ds_ap_textifunknownmetadata', htmlspecialchars ( $_POST [ 'textifunknownmetadata' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_saledisabledcategory', htmlspecialchars ( $_POST [ 'saledisabledcategory' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_textifsaledisabled', htmlspecialchars ( $_POST [ 'textifsaledisabled' ], ENT_QUOTES ) );
-?>
+	update_option ( 'ds_ap_currencycode4217', htmlspecialchars ( substr($_POST['currencycode4217'], 0, 3), ENT_QUOTES ) );
+	update_option ( 'ds_ap_currencysymbol', htmlspecialchars ( substr($_POST['currencycode4217'], 3), ENT_QUOTES ) );
+	?>
 	<div id="message" class="updated fade">
 		<p>
 			<strong>
@@ -165,6 +167,26 @@ for ( $i = 0; $i < $category_count; $i++ )
 <p>
 	Email address that is tied to your PayPal account:
 	<input type="text" name="paypalemail" size="40" value="<?php echo stripslashes ( get_option ( 'ds_ap_paypalemail' ) ); ?>" />
+</p>
+<p>
+	Currency:
+	<select name="currencycode4217">
+	<?php
+	global $artpal_currencycodes;
+	for ( $thisCurrency = 0; $thisCurrency < count($artpal_currencycodes); $thisCurrency ++ ) {
+		echo '<option value="';
+		// Concatenate ISO code (3 digits) with symbol
+		echo $artpal_currencycodes[$thisCurrency][1] . $artpal_currencycodes[$thisCurrency][2];
+		// Do we select it?
+		if ( $artpal_currencycodes[$thisCurrency][1] == get_option ( 'ds_ap_currencycode4217' ) ) {
+			echo '" selected="selected';
+		}
+		echo '">';
+		echo $artpal_currencycodes[$thisCurrency][0] . ' (' . $artpal_currencycodes[$thisCurrency][1] . '/' . $artpal_currencycodes[$thisCurrency][2] . ')';
+		echo '</option>';
+	}
+	?>
+	</select>
 </p>
 
 <p>
