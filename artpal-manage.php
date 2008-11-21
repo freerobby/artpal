@@ -4,7 +4,7 @@ file:	artpal-manage.php
 
 desc:	Manage Items page for ArtPal Wordpress Plugin
 
-author:	Digital Sublimity
+author:	Robby Grossman <http://www.freerobby.com>
 
 legal:	Copyright 2007 Digital Sublimity <http://www.digitalsublimity.com>
 		All rights reserved.
