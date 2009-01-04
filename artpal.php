@@ -370,7 +370,7 @@ function ds_ap_generatepaypalbutton ( $selleremail, $itemname, $itemnumber, $pri
 																			// be careful! if you uncomment the above line, you can't "reset" sold 
 																			// paintings to make them available again!
 		. '<input type="hidden" name="amount" value="' . $price . '">' // price of item
-		. '<input type="hidden" name="currency_code" value="' . get_option('ds_ap_currencycode4217') . '>' // us dollars only
+		. '<input type="hidden" name="currency_code" value="' . get_option('ds_ap_currencycode4217') . '">' // us dollars only
 		. '<input type="hidden" name="quantity" value="1">' // default 1 item
 		. '<input type="hidden" name="shipping" value="' . $shipping . '">' // shipping price of item
 		. '<input type="hidden" name="notify_url" value="' . get_option ( 'ds_ap_ipnpage' ) . '">'
