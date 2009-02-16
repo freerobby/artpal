@@ -3,7 +3,7 @@ Contributors: freerobby
 Donate link: http://www.freerobby.com/donate
 Tags: paypal, ecommerce, artists, sell
 Requires at least: 2.5
-Tested up to: 2.6.3
+Tested up to: 2.7.1
 Stable tag: 1.3.2
 
 ArtPal is a free (GPL) Wordpress plugin, originally written for Artists, to seemlessly integrate PayPal with their Wordpress blogs so that they can sell their work online.
