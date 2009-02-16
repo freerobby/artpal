@@ -8,7 +8,7 @@ Description: ArtPal allows artists to use Wordpress to sell their work through P
 
 Author: Robby Grossman
 
-Version: 1.3.1
+Version: 1.3.2
 
 Author URI: http://www.freerobby.com
 */
@@ -351,13 +351,12 @@ function ds_ap_generatepaypalbutton ( $selleremail, $itemname, $itemnumber, $pri
 		$pricetext = '<del>' . $cSymbol . $regularprice . '</del> ' . $pricetext;
 	}
 	$pretext = str_replace ( '_PRICE_', $pricetext, $pretext );
-	if ( $shipping == 0 )
-		$shipping = 'free';
+	$shippingtext = $shipping;
+	if ( $shippingtext == 0 )
+		$shippingtext = 'free';
 	else
-		$shipping = $cSymbol . $shipping;
-	$pretext = str_replace ( '_SHIPPING_', $shipping, $pretext );
-	if ( $shipping == 'free' )
-		$shipping = 0;
+		$shippingtext = $cSymbol . $shippingtext;
+	$pretext = str_replace ( '_SHIPPING_', $shippingtext, $pretext );
 	$button_html = $pretext . '<br />';
 	// Don't create the PayPal button if ecommerce is disabled.
 	if ( ! get_option ( 'ds_ap_disableecommerce' ) ) {
