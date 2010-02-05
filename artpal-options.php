@@ -6,11 +6,6 @@ desc:	Options page for ArtPal Wordpress Plugin
 
 author:	Robby Grossman
 
-legal:	Copyright 2007-2008 Digital Sublimity <http://www.digitalsublimity.com>
-		All rights reserved.
-		Unauthorized reuse of the code contained herein is strictly prohibited.
-
-notes:	
 */
 ?>
 <?php

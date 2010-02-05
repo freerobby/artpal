@@ -6,11 +6,6 @@ desc:	Manage Items page for ArtPal Wordpress Plugin
 
 author:	Robby Grossman <http://www.freerobby.com>
 
-legal:	Copyright 2007 Digital Sublimity <http://www.digitalsublimity.com>
-		All rights reserved.
-		Unauthorized reuse of the code contained herein is strictly prohibited.
-
-notes:	
 */
 ?>
 <?php
