@@ -145,7 +145,7 @@ function ds_ap_buynow_button () {
 	else {
 		// Apply discount to item if applicable.
 		$discount = get_option ( 'ds_ap_discountpercent' );
-		$price = $regularprice - ( $regularprice * ( $discount / 100 ) );
+		$price = number_format($regularprice - ( $regularprice * ( $discount / 100 ) ), 2);
 		// Get shipping cost of item
 		$shipping = get_post_meta ($id, ds_ap_CFSHIPPING, $single = true );
 		// Get name of item
