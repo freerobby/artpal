@@ -23,7 +23,7 @@ ArtPal's most important features are:
 
 1. Upload ./artpal directory to wp-content/plugins directory.
 2. Activate the plugin through the 'Plugins' menu in Wordpress.
-3. Configure as specified at [http://www.freerobby.com/artpal](http://www.freerobby.com/artpal).
+3. Configure as specified at [http://freerobby.com/artpal](http://freerobby.com/artpal).
 
 == Frequently Asked Questions ==
 

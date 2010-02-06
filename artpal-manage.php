@@ -4,7 +4,7 @@ file:	artpal-manage.php
 
 desc:	Manage Items page for ArtPal Wordpress Plugin
 
-author:	Robby Grossman <http://www.freerobby.com>
+author:	Robby Grossman <http://freerobby.com>
 
 */
 ?>

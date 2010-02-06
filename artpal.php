@@ -2,7 +2,7 @@
 /*
 Plugin Name: ArtPal
 
-Plugin URI: http://www.freerobby.com/artpal
+Plugin URI: http://freerobby.com/artpal
 
 Description: ArtPal allows artists to use Wordpress to sell their work through PayPal. It automates the entire selling process. Normally an artist has to make edits to a post once his artwork sells (i.e. he'll write "sold" under the picture, take away the PayPal button, and perhaps change the category in which the post is filed). ArtPal takes care of all these things automatically - in real time!
 
