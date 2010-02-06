@@ -27,6 +27,7 @@ if ( isset ( $_POST [ 'submitted' ] ) ) {
 	update_option ( 'ds_ap_textifsaledisabled', htmlspecialchars ( $_POST [ 'textifsaledisabled' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_currencycode4217', htmlspecialchars ( substr($_POST['currencycode4217'], 0, 3), ENT_QUOTES ) );
 	update_option ( 'ds_ap_currencysymbol', htmlspecialchars ( substr($_POST['currencycode4217'], 3), ENT_QUOTES ) );
+	update_option ( 'ds_ap_usesandbox', htmlspecialchars( $_POST['usesandbox'], ENT_QUOTES));
 	?>
 	<div id="message" class="updated fade">
 		<p>
@@ -262,6 +263,16 @@ for ( $i = 0; $i < $category_count; $i++ )
 	<br />
 	Check to disable ecommerce:
 	<input type="checkbox" name="disableecommerce" value="1" <?php if ( stripslashes ( get_option ( 'ds_ap_disableecommerce' ))) echo 'checked'; ?> />
+</p>
+
+<h3>
+  Sandbox Mode
+</h3>
+<p>
+  If you'd like to test your plugin, you may use sandbox mode. This will use the PayPal sandbox API (note: you will need to use a sandbox API account). No charges will be processed.
+  <br />
+  Check to use sandbox mode:
+  <input type="checkbox" name="usesandbox" value="1" <?php if ( stripslashes ( get_option ( 'ds_ap_usesandbox' ))) echo 'checked'; ?> />
 </p>
 
 <input type="submit" name="submitted" value="Update Options &raquo;" />

@@ -95,7 +95,8 @@ $ds_ap_options_names = array (
 	'ds_ap_saledisabledcategory',
 	'ds_ap_textifsaledisabled',
 	'ds_ap_currencycode4217',
-	'ds_ap_currencysymbol'
+	'ds_ap_currencysymbol',
+	'ds_ap_usesandbox'
 	);
 
 global $ds_ap_options_vals;
@@ -115,12 +116,20 @@ $ds_ap_options_vals = array (
 	'-1',
 	stripslashes('Sorry, this item is not currently available for sale. Please check back later.'),
 	$artpal_currencycodes[15][1], // USD
-	$artpal_currencycodes[15][1] // $
+	$artpal_currencycodes[15][1], // $
+	'0'
 );
 
 ////////////////////////////////////////////////////////////////////////////////
 // Functions
 ////////////////////////////////////////////////////////////////////////////////
+
+function get_paypal_domain() {
+  if (get_option('ds_ap_usesandbox') == true)
+    return "www.sandbox.paypal.com";
+  else
+    return "www.paypal.com";
+}
 
 // Define our configuration pages
 function ds_ap_add_pages () {
@@ -261,7 +270,7 @@ function ds_ap_doipn ($logging = false) {
 	$header .= "POST /cgi-bin/webscr HTTP/1.0\r\n";
 	$header .= "Content-Type: application/x-www-form-urlencoded\r\n";
 	$header .= "Content-Length: " . strlen($req) . "\r\n\r\n";
-	$fp = fsockopen ('www.paypal.com', 80, $errno, $errstr, 30);
+	$fp = fsockopen (get_paypal_domain(), 80, $errno, $errstr, 30);
 	// assign posted variables to local variables
 	$item_name = $_POST['item_name'];
 	$item_number = $_POST['item_number'];
@@ -360,7 +369,7 @@ function ds_ap_generatepaypalbutton ( $selleremail, $itemname, $itemnumber, $pri
 	$button_html = $pretext . '<br />';
 	// Don't create the PayPal button if ecommerce is disabled.
 	if ( ! get_option ( 'ds_ap_disableecommerce' ) ) {
-		$button_html .= '<form method="post" action="https://www.paypal.com/cgi-bin/webscr" target="paypal">'
+		$button_html .= '<form method="post" action="https://' . get_paypal_domain() . '/cgi-bin/webscr" target="paypal">'
 		. '<input type="hidden" name="cmd" value="_xclick">'
 		. '<input type="hidden" name="business" value="' . $selleremail . '">' // email account to send money to
 		. '<input type="hidden" name="item_name" value="' . $itemname . '">' // name of item to appear at checkout
