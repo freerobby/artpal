@@ -8,7 +8,7 @@ Description: ArtPal allows artists to use Wordpress to sell their work through P
 
 Author: Robby Grossman
 
-Version: 1.3.5
+Version: 1.4
 
 Author URI: http://freerobby.com
 */
