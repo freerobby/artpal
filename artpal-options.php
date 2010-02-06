@@ -17,7 +17,6 @@ if ( isset ( $_POST [ 'submitted' ] ) ) {
 	update_option ( 'ds_ap_soldcode', htmlspecialchars ( $_POST [ 'soldcode' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_prebuttontext', htmlspecialchars ( $_POST [ 'prebuttontext' ] ) );
 	update_option ( 'ds_ap_thankyoupage', htmlspecialchars ( $_POST [ 'thankyoupage' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_ipnpage', htmlspecialchars ( $_POST [ 'ipnpage' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_cancelpage', htmlspecialchars ( $_POST [ 'cancelpage' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_paypalbutton', htmlspecialchars ( $_POST [ 'paypalbutton' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_discountpercent', htmlspecialchars ( $_POST [ 'discountpercent' ], ENT_QUOTES ) );
@@ -183,12 +182,6 @@ for ( $i = 0; $i < $category_count; $i++ )
 	}
 	?>
 	</select>
-</p>
-
-<p>
-	URL of PayPal IPN page:
-	<br />
-	<input type="text" name="ipnpage" size="100" value="<?php echo stripslashes ( get_option ( 'ds_ap_ipnpage' ) ); ?>" />
 </p>
 
 <p>
