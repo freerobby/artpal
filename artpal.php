@@ -81,6 +81,7 @@ global $ds_ap_options_names;
 $ds_ap_options_names = array (
 	'ds_ap_unsoldcategory',
 	'ds_ap_soldcategory',
+	'ds_ap_taxrate',
 	'ds_ap_paypalemail',
 	'ds_ap_soldcode',
 	'ds_ap_prebuttontext',
@@ -101,6 +102,7 @@ global $ds_ap_options_vals;
 $ds_ap_options_vals = array (
 	NULL,
 	NULL,
+	'0.00',
 	stripslashes('ValidPaypalEmail@Goes.Here'),
 	stripslashes('<b>Sold!</b>'),
 	stripslashes('_PRICE_ via PayPal, _SHIPPING_ shipping within US'),
@@ -280,6 +282,7 @@ function ds_ap_generatepaypalbutton ( $selleremail, $itemname, $itemnumber, $pri
 																			// be careful! if you uncomment the above line, you can't "reset" sold 
 																			// paintings to make them available again!
 		. '<input type="hidden" name="amount" value="' . $price . '">' // price of item
+		. '<input type="hidden" name="tax" value="' . round(($price * (get_option ( 'ds_ap_taxrate' )/100)),2) . '">' // price of item
 		. '<input type="hidden" name="currency_code" value="' . get_option('ds_ap_currencycode4217') . '">' // us dollars only
 		. '<input type="hidden" name="quantity" value="1">' // default 1 item
 		. '<input type="hidden" name="shipping" value="' . $shipping . '">' // shipping price of item

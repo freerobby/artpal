@@ -13,6 +13,7 @@ author:	Robby Grossman
 if ( isset ( $_POST [ 'submitted' ] ) ) {
 	update_option ( 'ds_ap_unsoldcategory', htmlspecialchars ( $_POST [ 'unsold' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_soldcategory', htmlspecialchars ( $_POST [ 'sold' ], ENT_QUOTES ) );
+	update_option ( 'ds_ap_taxrate', htmlspecialchars ( $_POST [ 'taxrate' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_paypalemail', htmlspecialchars ( $_POST [ 'paypalemail' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_soldcode', htmlspecialchars ( $_POST [ 'soldcode' ], ENT_QUOTES ) );
 	update_option ( 'ds_ap_prebuttontext', htmlspecialchars ( $_POST [ 'prebuttontext' ] ) );
@@ -234,6 +235,14 @@ for ( $i = 0; $i < $category_count; $i++ )
 	}
 	echo '</table>';
 	?>
+</p>
+
+<h3>
+	Sales Tax
+</h3>
+<p>
+	Enter the sales tax rate you would like to apply to the products: 
+	<input type="text" name="taxrate" maxlength="2" size="2" value="<?php echo stripslashes ( get_option ( 'ds_ap_taxrate' ) ) ?>" /> &#37;
 </p>
 
 <h3>
