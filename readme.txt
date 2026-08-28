@@ -2,9 +2,9 @@
 Contributors: freerobby
 Donate link: http://freerobby.com/donate
 Tags: paypal, ecommerce, artists, sell
-Requires at least: 2.5
-Tested up to: 2.9.1
-Stable tag: 1.4
+Requires at least: 6.0
+Tested up to: 6.8
+Stable tag: 2.0.0-dev
 
 ArtPal is a free (GPL) Wordpress plugin, originally written for Artists, to seemlessly integrate PayPal with their Wordpress blogs so that they can sell their work online.
 == Description ==
@@ -24,6 +24,15 @@ ArtPal's most important features are:
 1. Upload ./artpal directory to wp-content/plugins directory.
 2. Activate the plugin through the 'Plugins' menu in Wordpress.
 3. Configure as specified at [http://freerobby.com/artpal](http://freerobby.com/artpal).
+
+== Changelog ==
+
+= 2.0.0-dev =
+* Inventory API: artpal_mark_sold() is idempotent and uses wp_remove_object_terms / wp_set_object_terms (no raw SQL).
+* Helpers: artpal_is_sold, artpal_is_available, artpal_is_sale_disabled, artpal_get_price, artpal_get_shipping, artpal_effective_price.
+* Shortcodes: [artpal=insert], [artpal], and [artpal insert], plus a the_content fallback.
+* Removed PHP4 htmlspecialchars_decode shim and wp-admin/admin-functions.php require.
+* PayPal _xclick checkout remains until the Stripe slice.
 
 == Frequently Asked Questions ==
 

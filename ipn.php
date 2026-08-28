@@ -65,14 +65,22 @@ else {
      }
      // check that payment_amount/payment_currency are correct
      // process payment
-     // Mark as sold!
+     // Mark as sold! Item number is the WordPress post ID.
      $post_id = $item_number;
      $old_cat = get_option ( 'ds_ap_unsoldcategory' );
      $new_cat = get_option ( 'ds_ap_soldcategory' );
      if ($logging) {
        fwrite ( $fh, "Changing Category of Post $post_id from $old_cat to $new_cat..." );
      }
-     ds_ap_change_taxonomy_of_object ( $post_id, $old_cat, $new_cat );
+     artpal_mark_sold( (int) $post_id, array(
+       'processor'    => 'paypal',
+       'event_id'     => isset( $txn_id ) ? $txn_id : '',
+       'buyer_email'  => isset( $payer_email ) ? $payer_email : '',
+       'amount_total' => isset( $payment_amount ) ? $payment_amount : '',
+       'currency'     => isset( $payment_currency ) ? $payment_currency : '',
+       'raw_ref'      => isset( $txn_id ) ? $txn_id : '',
+       'sold_at'      => gmdate( 'c' ),
+     ) );
      if ($logging) {
        fwrite ( $fh, "done\n" );
      }
