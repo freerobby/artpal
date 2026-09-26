@@ -10,6 +10,10 @@ Requires PHP: 7.4
 Author URI: http://freerobby.com
 */
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Global Constant Declarations
 ////////////////////////////////////////////////////////////////////////////////
@@ -29,11 +33,14 @@ register_activation_hook( __FILE__, 'ds_ap_install' );
 register_deactivation_hook( __FILE__, 'ds_ap_uninstall' );
 // Add our page to the administration menu
 add_action( 'admin_menu', 'ds_ap_add_pages' );
-// Shortcodes: [artpal=insert], [artpal], and [artpal insert]
+// [artpal] and [artpal insert]. [artpal=insert] is not a valid shortcode tag on WP 4.4+.
 add_action( 'init', 'artpal_register_shortcodes' );
-// Fallback for leftover raw [artpal=insert] if a theme skipped do_shortcode.
-add_filter( 'the_content', 'ds_ap_parsecontent', 12 );
+// String-replace [artpal=insert] before do_shortcode (priority 11).
+add_filter( 'the_content', 'ds_ap_parsecontent', 10 );
+add_action( 'add_meta_boxes', 'artpal_register_metabox' );
+add_action( 'save_post_post', 'artpal_save_metabox' );
 add_action( 'cli_init', 'artpal_register_cli' );
+require_once __DIR__ . '/artpal-options.php';
 
 ////////////////////////////////////////////////////////////////////////////////
 // Plugin Options Definitions
@@ -80,6 +87,8 @@ $ds_ap_options_names = array(
 	'ds_ap_currencycode4217',
 	'ds_ap_currencysymbol',
 	'ds_ap_usesandbox',
+	'ds_ap_notify_email',
+	'ds_ap_email_subject_prefix',
 );
 
 global $ds_ap_options_vals;
@@ -101,6 +110,8 @@ $ds_ap_options_vals = array(
 	$artpal_currencycodes[15][1], // USD
 	$artpal_currencycodes[15][2], // $
 	'0',
+	'', // ds_ap_notify_email — empty means fall back to PayPal email, then admin_email
+	'', // ds_ap_email_subject_prefix — empty means the site title
 );
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -120,14 +131,13 @@ function ipn_page_url() {
 
 // Define our configuration pages
 function ds_ap_add_pages() {
-	// Add our menu under "options"
-	add_options_page( 'ArtPal', 'ArtPal', 'edit_plugins', __FILE__, 'ds_ap_options_page' );
-	// Add our management menu under "Manage"
-	add_management_page( 'ArtPal Items', 'ArtPal Items', 'edit_posts', __FILE__, 'ds_ap_manage_page' );
+	add_options_page( 'ArtPal', 'ArtPal', 'manage_options', 'artpal', 'ds_ap_options_page' );
+	add_management_page( 'ArtPal Items', 'ArtPal Items', 'edit_posts', 'artpal-items', 'ds_ap_manage_page' );
 }
 
 function artpal_register_shortcodes() {
-	add_shortcode( 'artpal=insert', 'artpal_shortcode' );
+	// WordPress rejects shortcode names that contain "=" (WP 4.4+).
+	// Classic posts use the the_content fallback for the literal [artpal=insert].
 	add_shortcode( 'artpal', 'artpal_shortcode' );
 }
 
@@ -339,7 +349,7 @@ function artpal_mark_sold( $post_id, $context = array() ) {
 }
 
 /**
- * @param string $event_id Processor event id (Stripe evt_… or PayPal txn_id).
+ * @param string $event_id Processor event id (PayPal txn_id).
  * @return int 0 if unseen.
  */
 function artpal_event_post_id( $event_id ) {
@@ -419,19 +429,71 @@ function artpal_send_sold_email( $post_id, $context ) {
 	$body .= 'Event id: ' . $event . "\n\n";
 	$body .= "Category is now Sold; the buy button is off.\n";
 
-	$subject = '[Hudson Valley Painter] Sold: ' . $title;
-	$notify  = get_option( 'ds_ap_notify_email' );
-	if ( ! $notify ) {
-		$notify = 'JamieWG@aol.com';
-	}
+	$prefix = artpal_sold_subject_prefix();
+	$title  = str_replace( array( "\r", "\n" ), '', (string) $title );
+	$subject = '[' . $prefix . '] Sold: ' . $title;
 
-	$recipients = array( $notify );
-	$admin      = get_option( 'admin_email' );
-	if ( $admin && strtolower( $admin ) !== strtolower( $notify ) ) {
-		$recipients[] = $admin;
+	$recipients = artpal_sold_email_recipients();
+	if ( empty( $recipients ) ) {
+		return;
 	}
 
 	wp_mail( $recipients, $subject, $body );
+}
+
+/**
+ * Subject prefix from ds_ap_email_subject_prefix, otherwise the site title.
+ *
+ * @return string
+ */
+function artpal_sold_subject_prefix() {
+	$prefix = trim( (string) get_option( 'ds_ap_email_subject_prefix' ) );
+	$prefix = str_replace( array( "\r", "\n" ), '', $prefix );
+	if ( $prefix === '' ) {
+		$prefix = str_replace( array( "\r", "\n" ), '', trim( (string) get_bloginfo( 'name' ) ) );
+	}
+	return $prefix;
+}
+
+/**
+ * Sold notice recipients.
+ *
+ * Primary: ds_ap_notify_email, else ds_ap_paypalemail, else admin_email.
+ * admin_email is also included when it is different from the primary address.
+ *
+ * @return string[]
+ */
+function artpal_sold_email_recipients() {
+	$notify = trim( (string) get_option( 'ds_ap_notify_email' ) );
+	$paypal = trim( (string) get_option( 'ds_ap_paypalemail' ) );
+	$admin  = trim( (string) get_option( 'admin_email' ) );
+
+	$primary = '';
+	if ( $notify !== '' && is_email( $notify ) ) {
+		$primary = $notify;
+	} elseif ( $paypal !== '' && is_email( $paypal ) ) {
+		$primary = $paypal;
+	} elseif ( $admin !== '' && is_email( $admin ) ) {
+		$primary = $admin;
+	}
+
+	$recipients = array();
+	if ( $primary !== '' ) {
+		$recipients[] = $primary;
+	}
+	if ( $admin !== '' && is_email( $admin ) ) {
+		$seen = false;
+		foreach ( $recipients as $have ) {
+			if ( strtolower( $have ) === strtolower( $admin ) ) {
+				$seen = true;
+				break;
+			}
+		}
+		if ( ! $seen ) {
+			$recipients[] = $admin;
+		}
+	}
+	return $recipients;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -608,18 +670,22 @@ function ds_ap_install() {
 	}
 }
 
-// Define our options page
 function ds_ap_manage_page() {
-	include( 'artpal-manage.php' );
+	include __DIR__ . '/artpal-manage.php';
 }
 
-// Define our options page
 function ds_ap_options_page() {
-	include( 'artpal-options.php' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( 'You do not have permission to manage ArtPal settings.' );
+	}
+	artpal_render_options_page();
 }
 
 /**
- * Fallback: replace leftover raw [artpal=insert] after shortcodes have run.
+ * Fallback: string-replace raw [artpal=insert].
+ *
+ * A shortcode name containing "=" is rejected on WordPress 4.4+.
+ * This runs on the_content at priority 10, before do_shortcode at 11.
  *
  * @param string $content Post content.
  * @return string
@@ -633,6 +699,298 @@ function ds_ap_parsecontent( $content ) {
 
 function ds_ap_uninstall() {
 	// Do not delete options on deactivation. Live category IDs and copy must survive.
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Post metabox (posts only)
+////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Read-only inventory label for the metabox.
+ *
+ * Sold wins. Then Disabled, then Available, otherwise not an ArtPal item.
+ *
+ * @param int $post_id Post ID.
+ * @return string
+ */
+function artpal_inventory_label( $post_id ) {
+	if ( artpal_is_sold( $post_id ) ) {
+		return 'Sold';
+	}
+	if ( artpal_is_sale_disabled( $post_id ) ) {
+		return 'Disabled';
+	}
+	if ( artpal_is_available( $post_id ) ) {
+		return 'Available';
+	}
+	return 'Not an ArtPal item';
+}
+
+/**
+ * Normalize a price or shipping field.
+ *
+ * @param mixed $raw Raw form value.
+ * @return string|null|false Decimal string, null if empty (delete meta), false if not numeric.
+ */
+function artpal_normalize_meta_amount( $raw ) {
+	$raw = trim( str_replace( array( '$', ',', ' ' ), '', (string) $raw ) );
+	if ( $raw === '' ) {
+		return null;
+	}
+	if ( ! is_numeric( $raw ) ) {
+		return false;
+	}
+	return number_format( (float) $raw, 2, '.', '' );
+}
+
+/**
+ * @param int    $post_id Post ID.
+ * @param string $key     Meta key.
+ * @param mixed  $raw     Raw form value.
+ * @return void
+ */
+function artpal_write_amount_meta( $post_id, $key, $raw ) {
+	$norm = artpal_normalize_meta_amount( $raw );
+	if ( null === $norm ) {
+		delete_post_meta( $post_id, $key );
+		return;
+	}
+	if ( false === $norm ) {
+		return;
+	}
+	update_post_meta( $post_id, $key, $norm );
+}
+
+function artpal_register_metabox() {
+	add_meta_box(
+		'artpal_sale',
+		'ArtPal',
+		'artpal_render_metabox',
+		'post',
+		'side',
+		'high'
+	);
+}
+
+/**
+ * @param WP_Post $post Post object.
+ * @return void
+ */
+function artpal_render_metabox( $post ) {
+	wp_nonce_field( 'artpal_save_meta', 'artpal_meta_nonce' );
+	$price    = get_post_meta( $post->ID, ds_ap_CFPRICE, true );
+	$shipping = get_post_meta( $post->ID, ds_ap_CFSHIPPING, true );
+	$label    = artpal_inventory_label( $post->ID );
+
+	echo '<p><label for="artpal_price"><strong>Price</strong></label><br />';
+	echo '<input type="number" step="0.01" min="0" class="widefat" name="artpal_price" id="artpal_price" value="' . esc_attr( $price ) . '" />';
+	echo '<br /><span class="description">Leave blank when the price is not set. The inquire text is shown instead of a buy button.</span></p>';
+
+	echo '<p><label for="artpal_shipping"><strong>Shipping</strong></label><br />';
+	echo '<input type="number" step="0.01" min="0" class="widefat" name="artpal_shipping" id="artpal_shipping" value="' . esc_attr( $shipping ) . '" /></p>';
+
+	echo '<p><strong>Status:</strong> ' . esc_html( $label ) . '</p>';
+
+	if ( 'Sold' === $label ) {
+		$last = get_post_meta( $post->ID, ARTPAL_LAST_SALE_META, true );
+		if ( is_array( $last ) ) {
+			$proc  = isset( $last['processor'] ) ? (string) $last['processor'] : '';
+			$event = isset( $last['event_id'] ) ? (string) $last['event_id'] : '';
+			echo '<p><strong>Processor:</strong> ' . esc_html( $proc ) . '<br />';
+			echo '<strong>Event id:</strong> ' . esc_html( $event ) . '</p>';
+		}
+	}
+}
+
+/**
+ * Save price and shipping from the post metabox.
+ *
+ * Empty price deletes artpal_price so the inquire path stays available.
+ *
+ * @param int $post_id Post ID.
+ * @return void
+ */
+function artpal_save_metabox( $post_id ) {
+	if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+		return;
+	}
+	if ( function_exists( 'wp_is_post_autosave' ) && wp_is_post_autosave( $post_id ) ) {
+		return;
+	}
+	if ( function_exists( 'wp_is_post_revision' ) && wp_is_post_revision( $post_id ) ) {
+		return;
+	}
+	if ( ! isset( $_POST['artpal_meta_nonce'] ) ) {
+		return;
+	}
+	$nonce = sanitize_text_field( wp_unslash( $_POST['artpal_meta_nonce'] ) );
+	if ( ! wp_verify_nonce( $nonce, 'artpal_save_meta' ) ) {
+		return;
+	}
+	if ( ! current_user_can( 'edit_post', $post_id ) ) {
+		return;
+	}
+	if ( get_post_type( $post_id ) !== 'post' ) {
+		return;
+	}
+
+	if ( isset( $_POST['artpal_price'] ) ) {
+		artpal_write_amount_meta( $post_id, ds_ap_CFPRICE, wp_unslash( $_POST['artpal_price'] ) );
+	}
+	if ( isset( $_POST['artpal_shipping'] ) ) {
+		artpal_write_amount_meta( $post_id, ds_ap_CFSHIPPING, wp_unslash( $_POST['artpal_shipping'] ) );
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// PayPal IPN
+////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * PayPal webscr endpoint. Sandbox when ds_ap_usesandbox is on.
+ *
+ * @return string
+ */
+function artpal_paypal_webscr_url() {
+	return 'https://' . get_paypal_domain() . '/cgi-bin/webscr';
+}
+
+/**
+ * POST the IPN payload back to PayPal over HTTPS for _notify-validate.
+ *
+ * Tests may set $GLOBALS['artpal_test']['ipn_postback'] to skip the network.
+ *
+ * @param string $request_body application/x-www-form-urlencoded body including cmd=_notify-validate.
+ * @return string|WP_Error VERIFIED, INVALID, or an error.
+ */
+function artpal_paypal_ipn_postback( $request_body ) {
+	if ( isset( $GLOBALS['artpal_test'] ) && is_array( $GLOBALS['artpal_test'] ) && array_key_exists( 'ipn_postback', $GLOBALS['artpal_test'] ) ) {
+		$GLOBALS['artpal_test']['ipn_request'] = $request_body;
+		return $GLOBALS['artpal_test']['ipn_postback'];
+	}
+
+	$response = wp_remote_post(
+		artpal_paypal_webscr_url(),
+		array(
+			'timeout'     => 45,
+			'httpversion' => '1.1',
+			'headers'     => array(
+				'Content-Type' => 'application/x-www-form-urlencoded',
+				'Connection'   => 'Close',
+			),
+			'body'        => $request_body,
+		)
+	);
+
+	if ( is_wp_error( $response ) ) {
+		return $response;
+	}
+
+	$code = (int) wp_remote_retrieve_response_code( $response );
+	if ( $code < 200 || $code >= 300 ) {
+		return new WP_Error( 'artpal_ipn_http', 'PayPal IPN verification returned HTTP ' . $code );
+	}
+
+	return trim( (string) wp_remote_retrieve_body( $response ) );
+}
+
+/**
+ * Entry from ipn.php. Uses the raw body for verification and $_POST for field checks.
+ *
+ * @return void
+ */
+function artpal_handle_paypal_ipn() {
+	$raw  = file_get_contents( 'php://input' );
+	$post = ( isset( $_POST ) && is_array( $_POST ) ) ? wp_unslash( $_POST ) : array();
+	$result = artpal_process_paypal_ipn( $post, is_string( $raw ) ? $raw : '' );
+	if ( 'transport_error' === $result ) {
+		status_header( 500 );
+		return;
+	}
+	status_header( 200 );
+}
+
+/**
+ * Verify a PayPal IPN and mark the post sold when the checks pass.
+ *
+ * @param array  $post Parsed IPN fields.
+ * @param string $raw  Raw request body, when available.
+ * @return string Result code: empty, transport_error, not_verified, not_completed, email_mismatch, missing_post, missing_txn, sold.
+ */
+function artpal_process_paypal_ipn( $post, $raw = '' ) {
+	$post = is_array( $post ) ? $post : array();
+	$raw  = is_string( $raw ) ? $raw : '';
+
+	if ( $raw === '' && empty( $post ) ) {
+		return 'empty';
+	}
+
+	$validate = 'cmd=_notify-validate';
+	if ( $raw !== '' ) {
+		$validate .= '&' . $raw;
+	} else {
+		foreach ( $post as $key => $value ) {
+			if ( is_array( $value ) ) {
+				continue;
+			}
+			$validate .= '&' . rawurlencode( (string) $key ) . '=' . rawurlencode( (string) $value );
+		}
+	}
+
+	$verified = artpal_paypal_ipn_postback( $validate );
+	if ( is_object( $verified ) ) {
+		error_log( 'ArtPal IPN: PayPal verification request failed.' );
+		return 'transport_error';
+	}
+	if ( trim( (string) $verified ) !== 'VERIFIED' ) {
+		error_log( 'ArtPal IPN: payload was not VERIFIED.' );
+		return 'not_verified';
+	}
+
+	$status = isset( $post['payment_status'] ) ? (string) $post['payment_status'] : '';
+	if ( strcasecmp( $status, 'Completed' ) !== 0 ) {
+		error_log( 'ArtPal IPN: payment_status is not Completed.' );
+		return 'not_completed';
+	}
+
+	$receiver = isset( $post['receiver_email'] ) ? strtolower( trim( (string) $post['receiver_email'] ) ) : '';
+	$expected = strtolower( trim( (string) get_option( 'ds_ap_paypalemail' ) ) );
+	if ( $receiver === '' || $expected === '' || $receiver !== $expected ) {
+		error_log( 'ArtPal IPN: receiver_email does not match the PayPal email option.' );
+		return 'email_mismatch';
+	}
+
+	$item = isset( $post['item_number'] ) ? trim( (string) $post['item_number'] ) : '';
+	if ( $item === '' || ! ctype_digit( $item ) || ! get_post( (int) $item ) ) {
+		error_log( 'ArtPal IPN: item_number is not an existing post ID.' );
+		return 'missing_post';
+	}
+
+	$txn = isset( $post['txn_id'] ) ? trim( (string) $post['txn_id'] ) : '';
+	if ( $txn === '' ) {
+		error_log( 'ArtPal IPN: txn_id is missing.' );
+		return 'missing_txn';
+	}
+
+	$marked = artpal_mark_sold(
+		(int) $item,
+		array(
+			'processor'    => 'paypal',
+			'event_id'     => $txn,
+			'buyer_email'  => isset( $post['payer_email'] ) ? (string) $post['payer_email'] : '',
+			'amount_total' => isset( $post['mc_gross'] ) ? (string) $post['mc_gross'] : '',
+			'currency'     => isset( $post['mc_currency'] ) ? (string) $post['mc_currency'] : '',
+			'raw_ref'      => $txn,
+			'sold_at'      => gmdate( 'c' ),
+		)
+	);
+
+	if ( ! $marked ) {
+		error_log( 'ArtPal IPN: post ' . (int) $item . ' was not Sold after a verified payment.' );
+		return 'not_sold';
+	}
+
+	return 'sold';
 }
 
 ////////////////////////////////////////////////////////////////////////////////

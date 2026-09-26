@@ -1,135 +1,116 @@
 <?php
-/*
-file:	artpal-manage.php
+/**
+ * Tools → ArtPal Items.
+ *
+ * Post ID lookup stays available. The 2009 [paypal=title;price;shipping]
+ * upgrader is shown only when WP_DEBUG is on.
+ */
 
-desc:	Manage Items page for ArtPal Wordpress Plugin
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
-author:	Robby Grossman <http://freerobby.com>
+if ( ! current_user_can( 'edit_posts' ) ) {
+	wp_die( 'You do not have permission to manage ArtPal items.' );
+}
 
-*/
-?>
-<?php
-// If the user was searching for an item, ...
-if ( isset ( $_POST [ 'getitembynumber' ] ) ) {
-	$id = $_POST [ 'itemnumber' ];
-	$url = get_permalink ( $id );
-	// Check for invalid permalink
-	// There is no documented behavior for an invalid permalink, so we're going
-	// to cheat. We're going to generate a separate permalink that we know to
-	// be bad, and compare the actual permalink to that one.
-	if ( $url == get_permalink ( -1 ) ) {
-?>
-	<div id="message" class="updated fade">
-		<p>
-			<strong>
-				Item not found!
-			</strong>
-		</p>
-	</div>
-<?php
-	}
-	else {
-?>
-	<div id="message" class="updated fade">
-		<p>
-			<strong>
-				<a href="<?php echo $url; ?>">Here is a link to item number <?php echo $id; ?></a>.
-			</strong>
-		</p>
-	</div>
-<?php
+$lookup_message = '';
+$lookup_class   = 'updated';
+
+if ( isset( $_POST['getitembynumber'] ) ) {
+	check_admin_referer( 'artpal_lookup' );
+	$id   = isset( $_POST['itemnumber'] ) ? absint( wp_unslash( $_POST['itemnumber'] ) ) : 0;
+	$post = $id ? get_post( $id ) : null;
+	if ( ! $post ) {
+		$lookup_class   = 'error';
+		$lookup_message = 'Item not found.';
+	} else {
+		$url            = get_permalink( $post );
+		$lookup_message = '<a href="' . esc_url( $url ) . '">Here is a link to item number ' . esc_html( (string) $id ) . '</a>.';
 	}
 }
 ?>
 <div class="wrap">
-<h2>
-	Item Lookup
-</h2>
+	<h1>ArtPal Items</h1>
 
-<h3>
-	Find an Item (Post)
-</h3>
-<form action="<?php echo $_SERVER ['REQUEST_URI']; ?>" method="post">
-<p>
-	Enter item number (object id):
-	<input type="text" name="itemnumber" size="5" />
-	<br />
-	<input type="submit" name="getitembynumber" value="Get Link to Item..." />
-</p>
-</form>
+	<?php if ( $lookup_message !== '' ) : ?>
+		<div id="message" class="<?php echo esc_attr( $lookup_class ); ?> notice is-dismissible">
+			<p><strong><?php echo wp_kses_post( $lookup_message ); ?></strong></p>
+		</div>
+	<?php endif; ?>
 
-<h2>
-	Upgrade Items
-</h2>
-<p>Use this feature to upgrade old posts into the new ArtPal framework. This will do the following:</p>
+	<h2>Find an Item (Post)</h2>
+	<p>The item number is the WordPress post ID.</p>
+	<form method="post" action="">
+		<?php wp_nonce_field( 'artpal_lookup' ); ?>
+		<p>
+			<label for="artpal-itemnumber">Item number</label><br />
+			<input type="number" min="1" step="1" name="itemnumber" id="artpal-itemnumber" value="" />
+		</p>
+		<p>
+			<input type="submit" name="getitembynumber" class="button button-primary" value="Get Link to Item" />
+		</p>
+	</form>
 
-<ol>
-	<li>Search through all posts</li>
-	<li>Create custom fields based on tagged content.</li>
-	<li>Replace old tags with new ones</li>
-</ol>
-<form action="<?php echo $_SERVER ['REQUEST_URI']; ?>" method="post">
-<input type="submit" name="testupgrade" value="Test Upgrade &gt;" />
-<input type="submit" name="upgrade" value="Perform Upgrade &gt;" />
-</form>
-<?php
-	if ( isset ( $_POST [ 'upgrade' ] ) || isset ( $_POST [ 'testupgrade' ] ) ) {
-		$commit = false;
-		if ( isset ( $_POST [ 'upgrade' ] ) ) {
-			$commit = true;
-		}
-		
-		// Get all posts with ArtPal-like tags.
-		global $wpdb;
-		$sql = 'SELECT DISTINCT ID, post_content FROM ' . $wpdb -> posts . ' WHERE post_content LIKE "%[paypal=%;%;%]%"';
-		$poststoconvert = $wpdb -> get_results ( $sql, ARRAY_A );
-		$return_ids = array ();
-		$return_content = array ();
-		// Merge ID and content into respective arrays.
-		foreach ( $poststoconvert as $thisPost ) {
-			$return_ids [] = $thisPost [ 'ID' ];
-			$return_content [] = $thisPost [ 'post_content' ];
-		}
-		echo '<p>Converting the following posts: ';
-		foreach ( $return_ids as $thisID ) {
-			echo $thisID . ', ';
-		}
-		echo ' ...</p>';
-		
-		// Go through each post
-		for ( $thisPost = 0; $thisPost < count ( $return_ids ); $thisPost++ ) {
-			echo '<p>Reading post ' . $return_ids [ $thisPost ] . '...<br />';
-			$content = $return_content [ $thisPost ];
-			if ( preg_match ('/\[paypal=(.*);(.*);(.*)\]/iU', $content, $matches) ) {
-				echo 'Tag: <strong>' . $matches [ 0 ] . '</strong><br />';
-				echo 'Title (ignored): <strong>' . $matches [ 1 ] . '</strong><br />';
-				echo 'Price: <strong>' . $matches [ 2 ] . '</strong><br />';
-				echo 'Shipping: <strong>' . $matches [ 3 ] . '</strong><br />';
-				
-				// Insert price metadata
-				$sql = 'INSERT INTO ' . $wpdb -> postmeta . ' ( post_id, meta_key, meta_value ) VALUES ( ' . $return_ids [ $thisPost ] . ', "' . ds_ap_CFPRICE . '", "' . $matches [ 2 ] . '" )';
-				echo $sql . '<br />';
-				if ( $commit )
-					$wpdb -> query ( $sql );
-				$sql = 'INSERT INTO ' . $wpdb -> postmeta . ' ( post_id, meta_key, meta_value ) VALUES ( ' . $return_ids [ $thisPost ] . ', "' . ds_ap_CFSHIPPING . '", "' . $matches [ 3 ] . '" )';
-				echo $sql . '<br />';
-				if ( $commit )
-					$wpdb -> query ( $sql );
-				
-				// Replace old data with new.
-				$content = str_replace  ( $matches [ 0 ], ds_ap_TAGINSERT, $content );
-				$sql = 'UPDATE ' . $wpdb -> posts . ' SET post_content = "' . addslashes ( $content ) . '" WHERE  ID = ' . $return_ids [ $thisPost ];
-				if ( $commit )
-					$wpdb -> query ( $sql );
+	<?php if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) : ?>
+		<h2>Upgrade Items</h2>
+		<p>Debug only. Converts leftover 2009 <code>[paypal=title;price;shipping]</code> tags into <code>[artpal=insert]</code> and post meta. Do not run this against a site that was already upgraded.</p>
+		<form method="post" action="">
+			<?php wp_nonce_field( 'artpal_upgrade' ); ?>
+			<input type="submit" name="testupgrade" class="button" value="Test Upgrade" />
+			<input type="submit" name="upgrade" class="button" value="Perform Upgrade" />
+		</form>
+		<?php
+		if ( isset( $_POST['upgrade'] ) || isset( $_POST['testupgrade'] ) ) {
+			check_admin_referer( 'artpal_upgrade' );
+			$commit = isset( $_POST['upgrade'] );
+
+			global $wpdb;
+			$sql            = 'SELECT DISTINCT ID, post_content FROM ' . $wpdb->posts . ' WHERE post_content LIKE "%[paypal=%;%;%]%"';
+			$poststoconvert = $wpdb->get_results( $sql, ARRAY_A );
+			$return_ids     = array();
+			$return_content = array();
+			if ( is_array( $poststoconvert ) ) {
+				foreach ( $poststoconvert as $this_post ) {
+					$return_ids[]     = $this_post['ID'];
+					$return_content[] = $this_post['post_content'];
+				}
 			}
-			echo '</p>';
+			echo '<p>Converting the following posts: ';
+			foreach ( $return_ids as $this_id ) {
+				echo esc_html( (string) $this_id ) . ', ';
+			}
+			echo ' ...</p>';
+
+			for ( $this_post = 0; $this_post < count( $return_ids ); $this_post++ ) {
+				echo '<p>Reading post ' . esc_html( (string) $return_ids[ $this_post ] ) . '...<br />';
+				$content = $return_content[ $this_post ];
+				if ( preg_match( '/\[paypal=(.*);(.*);(.*)\]/iU', $content, $matches ) ) {
+					echo 'Tag: <strong>' . esc_html( $matches[0] ) . '</strong><br />';
+					echo 'Title (ignored): <strong>' . esc_html( $matches[1] ) . '</strong><br />';
+					echo 'Price: <strong>' . esc_html( $matches[2] ) . '</strong><br />';
+					echo 'Shipping: <strong>' . esc_html( $matches[3] ) . '</strong><br />';
+
+					if ( $commit ) {
+						update_post_meta( (int) $return_ids[ $this_post ], ds_ap_CFPRICE, sanitize_text_field( $matches[2] ) );
+						update_post_meta( (int) $return_ids[ $this_post ], ds_ap_CFSHIPPING, sanitize_text_field( $matches[3] ) );
+						$new_content = str_replace( $matches[0], ds_ap_TAGINSERT, $content );
+						wp_update_post(
+							array(
+								'ID'           => (int) $return_ids[ $this_post ],
+								'post_content' => $new_content,
+							)
+						);
+					}
+				}
+				echo '</p>';
+			}
+			if ( $commit ) {
+				echo '<p><strong>Changes committed.</strong></p>';
+			} else {
+				echo '<p><strong>Changes not committed.</strong></p>';
+			}
 		}
-		if ( $commit ) 
-			echo '<p><strong>Changes committed.</strong></p>';
-		else
-			echo '<p><strong>Changes not committed.</strong></p>';
-	}
-?>
-<p>
-</p>
+		?>
+	<?php endif; ?>
 </div>

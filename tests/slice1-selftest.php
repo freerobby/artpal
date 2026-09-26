@@ -30,7 +30,9 @@ function artpal_test_reset() {
 			'ds_ap_textifsaledisabled'     => 'Sorry, this item is not currently available for sale. Please check back later.',
 			'ds_ap_textifunknownmetadata'  => 'Please contact me if you are interested in purchasing this piece.',
 			'ds_ap_prebuttontext'          => '_PRICE_ via PayPal, _SHIPPING_ shipping within US',
-			'ds_ap_paypalemail'            => 'jamiewg@aol.com',
+			'ds_ap_paypalemail'            => 'seller@example.com',
+			'ds_ap_notify_email'           => '',
+			'ds_ap_email_subject_prefix'   => '',
 			'ds_ap_currencysymbol'         => '$',
 			'ds_ap_currencycode4217'       => 'USD',
 			'ds_ap_taxrate'                => '0.00',
@@ -48,6 +50,7 @@ function artpal_test_reset() {
 		'mail'      => array(),
 		'actions'   => array(),
 		'logs'      => array(),
+		'blogname'  => 'Test Blog',
 	);
 }
 
@@ -138,16 +141,84 @@ if ( ! function_exists( 'get_post' ) ) {
 		unset( $file, $cb );
 	}
 	function add_action( $hook, $cb, $pri = 10, $args = 1 ) {
-		unset( $hook, $cb, $pri, $args );
+		$GLOBALS['artpal_registered'][] = array( 'action', $hook, $cb, $pri );
+		unset( $args );
 	}
 	function add_filter( $hook, $cb, $pri = 10, $args = 1 ) {
-		unset( $hook, $cb, $pri, $args );
+		$GLOBALS['artpal_registered'][] = array( 'filter', $hook, $cb, $pri );
+		unset( $args );
 	}
 	function add_shortcode( $tag, $cb ) {
-		unset( $tag, $cb );
+		$GLOBALS['artpal_registered'][] = array( 'shortcode', $tag, $cb );
 	}
-	function add_options_page() {}
-	function add_management_page() {}
+	function add_options_page( $page_title, $menu_title, $capability, $menu_slug, $callback = '' ) {
+		$GLOBALS['artpal_registered'][] = array( 'options_page', $capability, $menu_slug, $callback );
+		unset( $page_title, $menu_title );
+	}
+	function add_management_page( $page_title, $menu_title, $capability, $menu_slug, $callback = '' ) {
+		$GLOBALS['artpal_registered'][] = array( 'management_page', $capability, $menu_slug, $callback );
+		unset( $page_title, $menu_title );
+	}
+	function get_bloginfo( $show = '', $filter = 'raw' ) {
+		unset( $filter );
+		if ( 'name' === $show ) {
+			return isset( $GLOBALS['artpal_test']['blogname'] ) ? $GLOBALS['artpal_test']['blogname'] : 'Test Blog';
+		}
+		return '';
+	}
+	function is_email( $email ) {
+		return (bool) filter_var( (string) $email, FILTER_VALIDATE_EMAIL );
+	}
+	function wp_unslash( $value ) {
+		return $value;
+	}
+	function sanitize_text_field( $value ) {
+		return trim( (string) $value );
+	}
+	function wp_verify_nonce( $nonce, $action ) {
+		unset( $nonce, $action );
+		return ! empty( $GLOBALS['artpal_test']['nonce_ok'] );
+	}
+	function current_user_can( $cap, $id = null ) {
+		unset( $cap, $id );
+		return ! empty( $GLOBALS['artpal_test']['can'] );
+	}
+	function get_post_type( $post_id ) {
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return '';
+		}
+		return isset( $post['post_type'] ) ? $post['post_type'] : 'post';
+	}
+	function wp_is_post_autosave( $post_id ) {
+		unset( $post_id );
+		return false;
+	}
+	function wp_is_post_revision( $post_id ) {
+		unset( $post_id );
+		return false;
+	}
+	function delete_post_meta( $post_id, $key ) {
+		unset( $GLOBALS['artpal_test']['meta'][ (int) $post_id ][ $key ] );
+		return true;
+	}
+	function esc_html( $text ) {
+		return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+	}
+	function esc_attr( $text ) {
+		return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+	}
+	function wp_nonce_field( $action, $name = '_wpnonce', $referer = true, $echo = true ) {
+		unset( $action, $referer );
+		$html = '<input type="hidden" name="' . $name . '" value="nonce" />';
+		if ( $echo ) {
+			echo $html;
+		}
+		return $html;
+	}
+	function add_meta_box( $id, $title, $callback, $screen = null, $context = 'advanced', $priority = 'default' ) {
+		$GLOBALS['artpal_test']['meta_boxes'][] = array( $id, $title, $callback, $screen, $context, $priority );
+	}
 }
 
 function artpal_test_seed_post( $id, $cats, $price = null, $shipping = null, $title = 'Splash!' ) {
@@ -199,6 +270,9 @@ $html = artpal_render_buy_now( 8358 );
 artpal_assert( strpos( $html, 'SOLD!' ) !== false, 'renderer shows sold HTML' );
 artpal_assert( strpos( $html, '<form' ) === false, 'renderer has no checkout form after sold' );
 artpal_assert( count( $GLOBALS['artpal_test']['mail'] ) === 1, 'first mark_sold sends one email' );
+$mail_to = $GLOBALS['artpal_test']['mail'][0][0];
+artpal_assert( $mail_to === array( 'seller@example.com', 'admin@example.com' ), 'sold email goes to PayPal email and admin_email when notify is empty' );
+artpal_assert( $GLOBALS['artpal_test']['mail'][0][1] === '[Test Blog] Sold: Splash!', 'sold subject uses the site title when the prefix option is empty' );
 artpal_assert( count( $GLOBALS['artpal_test']['actions'] ) === 1 && $GLOBALS['artpal_test']['actions'][0][0] === 'artpal_marked_sold', 'artpal_marked_sold action fired once' );
 
 // 3. Second mark_sold → still Sold, no second email
@@ -266,10 +340,164 @@ $GLOBALS['id'] = 8358;
 $out = ds_ap_parsecontent( 'Hello [artpal=insert] there' );
 artpal_assert( strpos( $out, '[artpal=insert]' ) === false && strpos( $out, '_xclick' ) !== false, 'the_content fallback replaces [artpal=insert]' );
 
+// Ecommerce disabled: price text, no form
+artpal_test_reset();
+artpal_test_seed_post( 30, array( 5 ), '150', '0' );
+$GLOBALS['artpal_test']['options']['ds_ap_disableecommerce'] = '1';
+$html = artpal_render_buy_now( 30 );
+artpal_assert( strpos( $html, '$150.00' ) !== false && strpos( $html, '<form' ) === false, 'ecommerce disabled shows price text and no form' );
+
+// Notify email wins, and a custom prefix is used. admin_email is added when different.
+artpal_test_reset();
+artpal_test_seed_post( 31, array( 3 ), '150', '15', 'Ridge' );
+$GLOBALS['artpal_test']['options']['ds_ap_notify_email'] = 'notify@example.com';
+$GLOBALS['artpal_test']['options']['ds_ap_email_subject_prefix'] = 'Studio';
+$GLOBALS['artpal_test']['mail'] = array();
+artpal_send_sold_email( 31, array( 'processor' => 'paypal', 'event_id' => 'txn_x', 'buyer_email' => 'b@example.com', 'amount_total' => '150.00' ) );
+artpal_assert( $GLOBALS['artpal_test']['mail'][0][0] === array( 'notify@example.com', 'admin@example.com' ), 'notify email is primary and admin is copied' );
+artpal_assert( $GLOBALS['artpal_test']['mail'][0][1] === '[Studio] Sold: Ridge', 'custom subject prefix is used' );
+
+// No duplicate when the only address is admin_email
+artpal_test_reset();
+artpal_test_seed_post( 32, array( 3 ), '10', '0', 'Sketch' );
+$GLOBALS['artpal_test']['options']['ds_ap_notify_email'] = '';
+$GLOBALS['artpal_test']['options']['ds_ap_paypalemail'] = '';
+$GLOBALS['artpal_test']['mail'] = array();
+artpal_send_sold_email( 32, array() );
+artpal_assert( $GLOBALS['artpal_test']['mail'][0][0] === array( 'admin@example.com' ), 'admin_email is used once when notify and PayPal email are empty' );
+
+// Metabox: empty price deletes meta; shipping is stored; status labels
+artpal_assert( artpal_normalize_meta_amount( '' ) === null, 'empty amount deletes meta' );
+artpal_assert( artpal_normalize_meta_amount( '$1,250.5' ) === '1250.50', 'amount normalization strips symbols' );
+artpal_assert( artpal_inventory_label( 32 ) === 'Sold', 'sold status label' );
+artpal_test_reset();
+artpal_test_seed_post( 40, array( 5, 12 ), '150', '15', 'Draft piece' );
+artpal_assert( artpal_inventory_label( 40 ) === 'Available', 'available status label' );
+artpal_test_seed_post( 41, array( 5, 6 ), '150', '15' );
+artpal_assert( artpal_inventory_label( 41 ) === 'Disabled', 'disabled status label' );
+artpal_test_seed_post( 42, array( 99 ), '150', '15' );
+artpal_assert( artpal_inventory_label( 42 ) === 'Not an ArtPal item', 'unrelated status label' );
+artpal_test_seed_post( 43, array( 3, 6 ), '150', '15' );
+artpal_assert( artpal_inventory_label( 43 ) === 'Sold', 'sold wins over disabled' );
+
+$GLOBALS['artpal_test']['nonce_ok'] = true;
+$GLOBALS['artpal_test']['can'] = true;
+$_POST = array(
+	'artpal_meta_nonce' => 'nonce',
+	'artpal_price'      => '',
+	'artpal_shipping'   => '15',
+);
+artpal_save_metabox( 40 );
+artpal_assert( artpal_get_price( 40 ) === null, 'metabox empty price takes the inquire path' );
+artpal_assert( artpal_get_shipping( 40 ) === 15.0, 'metabox saves shipping' );
+$_POST['artpal_price'] = '25.5';
+artpal_save_metabox( 40 );
+artpal_assert( get_post_meta( 40, 'artpal_price', true ) === '25.50', 'metabox saves price to artpal_price' );
+
+$GLOBALS['artpal_test']['meta_boxes'] = array();
+artpal_register_metabox();
+artpal_assert( $GLOBALS['artpal_test']['meta_boxes'][0][3] === 'post', 'metabox is registered for posts only' );
+
+$sold_post = (object) array( 'ID' => 43 );
+$GLOBALS['artpal_test']['meta'][43]['_artpal_last_sale'] = array(
+	'processor' => 'paypal',
+	'event_id'  => 'txn_43',
+);
+ob_start();
+artpal_render_metabox( $sold_post );
+$box = ob_get_clean();
+artpal_assert( strpos( $box, 'Sold' ) !== false && strpos( $box, 'paypal' ) !== false && strpos( $box, 'txn_43' ) !== false, 'sold metabox shows processor and event id' );
+
+// IPN: only VERIFIED + Completed + matching receiver + real post ID marks sold
+artpal_test_reset();
+artpal_test_seed_post( 50, array( 5, 12, 20 ), '150', '15', 'IPN piece' );
+$ipn_post = array(
+	'payment_status' => 'Completed',
+	'receiver_email' => 'Seller@Example.com',
+	'item_number'    => '50',
+	'txn_id'         => 'txn_ipn_1',
+	'payer_email'    => 'buyer@example.com',
+	'mc_gross'       => '150.00',
+	'mc_currency'    => 'USD',
+);
+$GLOBALS['artpal_test']['ipn_postback'] = 'INVALID';
+artpal_assert( artpal_process_paypal_ipn( $ipn_post, 'payment_status=Completed' ) === 'not_verified', 'INVALID IPN does not mark sold' );
+artpal_assert( ! artpal_is_sold( 50 ), 'post stays available after INVALID IPN' );
+artpal_assert( strpos( $GLOBALS['artpal_test']['ipn_request'], 'cmd=_notify-validate' ) === 0, 'IPN postback starts with cmd=_notify-validate' );
+
+$GLOBALS['artpal_test']['ipn_postback'] = "VERIFIED\n";
+$pending = $ipn_post;
+$pending['payment_status'] = 'Pending';
+artpal_assert( artpal_process_paypal_ipn( $pending, 'raw' ) === 'not_completed', 'Pending IPN does not mark sold' );
+artpal_assert( ! artpal_is_sold( 50 ), 'post stays available after Pending IPN' );
+
+$bad_email = $ipn_post;
+$bad_email['receiver_email'] = 'other@example.com';
+artpal_assert( artpal_process_paypal_ipn( $bad_email, 'raw' ) === 'email_mismatch', 'receiver_email must match the PayPal option' );
+artpal_assert( ! artpal_is_sold( 50 ), 'post stays available when receiver_email mismatches' );
+
+$missing = $ipn_post;
+$missing['item_number'] = '99999';
+artpal_assert( artpal_process_paypal_ipn( $missing, 'raw' ) === 'missing_post', 'unknown item_number does not mark sold' );
+
+$GLOBALS['artpal_test']['mail'] = array();
+artpal_assert( artpal_process_paypal_ipn( $ipn_post, 'payment_status=Completed&txn_id=txn_ipn_1' ) === 'sold', 'VERIFIED Completed IPN marks sold' );
+artpal_assert( artpal_is_sold( 50 ), 'IPN post is sold' );
+$ipn_cats = artpal_get_category_ids( 50 );
+artpal_assert( in_array( 3, $ipn_cats, true ) && ! in_array( 5, $ipn_cats, true ) && in_array( 12, $ipn_cats, true ) && in_array( 20, $ipn_cats, true ), 'IPN removes Available, appends Sold, keeps other categories' );
+$last = get_post_meta( 50, '_artpal_last_sale', true );
+artpal_assert( is_array( $last ) && $last['processor'] === 'paypal' && $last['event_id'] === 'txn_ipn_1' && $last['buyer_email'] === 'buyer@example.com', 'IPN stores paypal context' );
+artpal_assert( count( $GLOBALS['artpal_test']['mail'] ) === 1, 'IPN sends one email' );
+artpal_assert( artpal_process_paypal_ipn( $ipn_post, 'replay' ) === 'sold', 'replayed IPN stays sold' );
+artpal_assert( count( $GLOBALS['artpal_test']['mail'] ) === 1, 'replayed IPN does not email again' );
+
+artpal_assert( artpal_paypal_webscr_url() === 'https://www.paypal.com/cgi-bin/webscr', 'live IPN verify URL is HTTPS' );
+$GLOBALS['artpal_test']['options']['ds_ap_usesandbox'] = '1';
+artpal_assert( artpal_paypal_webscr_url() === 'https://www.sandbox.paypal.com/cgi-bin/webscr', 'sandbox IPN verify URL is HTTPS' );
+
+// Registration and source guards
+artpal_register_shortcodes();
+ds_ap_add_pages();
+$shortcodes = array();
+$content_priority = null;
+$option_cap = null;
+foreach ( $GLOBALS['artpal_registered'] as $reg ) {
+	if ( $reg[0] === 'shortcode' ) {
+		$shortcodes[] = $reg[1];
+	}
+	if ( $reg[0] === 'filter' && $reg[1] === 'the_content' && $reg[2] === 'ds_ap_parsecontent' ) {
+		$content_priority = $reg[3];
+	}
+	if ( $reg[0] === 'options_page' ) {
+		$option_cap = $reg[1];
+	}
+}
+artpal_assert( in_array( 'artpal', $shortcodes, true ), '[artpal] shortcode is registered' );
+artpal_assert( ! in_array( 'artpal=insert', $shortcodes, true ), '[artpal=insert] is not registered with add_shortcode' );
+artpal_assert( $content_priority === 10, 'the_content fallback runs at priority 10' );
+artpal_assert( $option_cap === 'manage_options', 'settings page capability is manage_options' );
+
+global $ds_ap_options_names;
+artpal_assert( in_array( 'ds_ap_notify_email', $ds_ap_options_names, true ), 'notify email option is registered for activation' );
+artpal_assert( in_array( 'ds_ap_email_subject_prefix', $ds_ap_options_names, true ), 'subject prefix option is registered for activation' );
+$GLOBALS['artpal_test']['options']['ds_ap_notify_email'] = 'keep@example.com';
+ds_ap_install();
+artpal_assert( get_option( 'ds_ap_notify_email' ) === 'keep@example.com', 'activation does not reset notify email' );
+
+$plugin = file_get_contents( dirname( __DIR__ ) . '/artpal.php' );
+$ipn    = file_get_contents( dirname( __DIR__ ) . '/ipn.php' );
+$opts   = file_get_contents( dirname( __DIR__ ) . '/artpal-options.php' );
+artpal_assert( strpos( $plugin, 'JamieWG' ) === false && strpos( $plugin, 'Hudson Valley Painter' ) === false, 'sold email has no hardcoded site name or address' );
+artpal_assert( strpos( $plugin, 'edit_plugins' ) === false, 'edit_plugins capability is gone' );
+artpal_assert( strpos( $plugin, 'fsockopen' ) === false && strpos( $ipn, 'fsockopen' ) === false, 'no fsockopen' );
+artpal_assert( strpos( $ipn, 'wp-load.php' ) !== false && strpos( $ipn, 'wp-blog-header.php' ) === false, 'ipn.php boots through wp-load.php' );
+artpal_assert( stripos( $plugin, 'stripe' ) === false && stripos( $ipn, 'stripe' ) === false && stripos( $opts, 'stripe' ) === false, 'no Stripe code' );
+artpal_assert( strpos( $plugin, 'admin-functions.php' ) === false, 'admin-functions.php require is gone' );
+
 echo "\n";
 if ( $failed ) {
 	echo "$failed assertion(s) failed.\n";
 	exit( 1 );
 }
-echo "All Slice 1 assertions passed.\n";
+echo "All ArtPal assertions passed.\n";
 exit( 0 );

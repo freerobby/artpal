@@ -30,9 +30,12 @@ ArtPal's most important features are:
 = 2.0.0-dev =
 * Inventory API: artpal_mark_sold() is idempotent and uses wp_remove_object_terms / wp_set_object_terms (no raw SQL).
 * Helpers: artpal_is_sold, artpal_is_available, artpal_is_sale_disabled, artpal_get_price, artpal_get_shipping, artpal_effective_price.
-* Shortcodes: [artpal=insert], [artpal], and [artpal insert], plus a the_content fallback.
-* Removed PHP4 htmlspecialchars_decode shim and wp-admin/admin-functions.php require.
-* PayPal _xclick checkout remains until the Stripe slice.
+* [artpal=insert] is replaced on the_content. [artpal] and [artpal insert] are real shortcodes. "=" is not a valid shortcode name on current WordPress.
+* Post metabox for price, shipping, and read-only status.
+* Settings → ArtPal uses the Settings API (manage_options) and keeps every existing option.
+* Sold email uses the notification email, then the PayPal email, then the admin email. Subject prefix defaults to the site title.
+* PayPal IPN verifies over HTTPS and marks sold only after VERIFIED + Completed.
+* PayPal _xclick remains the checkout. The 2009 tag upgrader is hidden unless WP_DEBUG is on.
 
 == Frequently Asked Questions ==
 
