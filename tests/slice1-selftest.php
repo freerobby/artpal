@@ -219,6 +219,16 @@ if ( ! function_exists( 'get_post' ) ) {
 	function add_meta_box( $id, $title, $callback, $screen = null, $context = 'advanced', $priority = 'default' ) {
 		$GLOBALS['artpal_test']['meta_boxes'][] = array( $id, $title, $callback, $screen, $context, $priority );
 	}
+	function plugins_url( $path = '', $plugin = '' ) {
+		unset( $plugin );
+		return 'https://plugins.example/' . ltrim( (string) $path, '/' );
+	}
+	function esc_url( $url ) {
+		return (string) $url;
+	}
+	function esc_url_raw( $url ) {
+		return (string) $url;
+	}
 }
 
 function artpal_test_seed_post( $id, $cats, $price = null, $shipping = null, $title = 'Splash!' ) {
@@ -493,6 +503,27 @@ artpal_assert( strpos( $plugin, 'fsockopen' ) === false && strpos( $ipn, 'fsocko
 artpal_assert( strpos( $ipn, 'wp-load.php' ) !== false && strpos( $ipn, 'wp-blog-header.php' ) === false, 'ipn.php boots through wp-load.php' );
 artpal_assert( stripos( $plugin, 'stripe' ) === false && stripos( $ipn, 'stripe' ) === false && stripos( $opts, 'stripe' ) === false, 'no Stripe code' );
 artpal_assert( strpos( $plugin, 'admin-functions.php' ) === false, 'admin-functions.php require is gone' );
+artpal_assert( strpos( $opts, 'settings_errors' ) === false, 'settings screen does not print a second saved notice' );
+
+// Buy button image: a flushed host cache can leave a stale absolute URL in the option.
+$button_map = artpal_paypal_button_map();
+$stale_button = 'https://cdn.getflywheel.com/content/old-cache/wp-content/plugins/artpal/images/paypal/btn_buynow_LG.gif?wpe_cache=1';
+artpal_assert( isset( $button_map['btn_buynow_LG.gif'] ), 'bundled large buy button is found' );
+artpal_assert( artpal_paypal_button_url( $stale_button ) === $button_map['btn_buynow_LG.gif'], 'stale button URL resolves from the bundled filename' );
+artpal_assert( artpal_paypal_button_url( 'btn_buynow_SM.gif' ) === $button_map['btn_buynow_SM.gif'], 'stored button filename resolves to the current URL' );
+artpal_assert( artpal_paypal_button_url( $button_map['btn_buynow_LG.gif'] ) === $button_map['btn_buynow_LG.gif'], 'current button URL is left as-is' );
+artpal_assert( artpal_paypal_button_url( 'https://example.com/custom-button.gif' ) === 'https://example.com/custom-button.gif', 'custom button URL is not rewritten' );
+artpal_assert( artpal_sanitize_paypal_button( $stale_button ) === $button_map['btn_buynow_LG.gif'], 'saving a stale button URL stores the current URL' );
+$GLOBALS['artpal_test']['options']['ds_ap_paypalbutton'] = 'https://example.com/custom-button.gif';
+artpal_assert( artpal_sanitize_paypal_button( 'https://evil.example/nope.gif' ) === 'https://example.com/custom-button.gif', 'unrecognized button image keeps the saved URL' );
+
+artpal_test_reset();
+artpal_test_seed_post( 80, array( 5 ), '150', '15', 'Cache piece' );
+$GLOBALS['artpal_test']['options']['ds_ap_paypalbutton'] = $stale_button;
+$html = artpal_render_buy_now( 80 );
+artpal_assert( strpos( $html, 'src="' . $button_map['btn_buynow_LG.gif'] . '"' ) !== false, 'checkout uses the live button URL when the option is stale' );
+artpal_assert( strpos( $html, 'getflywheel.com' ) === false, 'checkout does not keep the stale button host' );
+artpal_assert( strpos( $plugin, 'Version: 2.0.1' ) !== false, 'plugin patch version is 2.0.1' );
 
 echo "\n";
 if ( $failed ) {

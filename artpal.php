@@ -4,7 +4,7 @@ Plugin Name: ArtPal
 Plugin URI: http://freerobby.com/artpal
 Description: ArtPal allows artists to use WordPress to sell one-of-a-kind originals. When a piece sells, ArtPal stops showing a buy button, shows the sold HTML, and moves the post from the Available category to the Sold category.
 Author: Robby Grossman
-Version: 2.0.0
+Version: 2.0.1
 Requires at least: 6.0
 Requires PHP: 7.4
 Author URI: http://freerobby.com
@@ -653,7 +653,7 @@ function ds_ap_generatepaypalbutton( $selleremail, $itemname, $itemnumber, $pric
 		. '<input type="hidden" name="notify_url" value="' . ipn_page_url() . '">'
 		. '<input type="hidden" name="return" value="' . get_option( 'ds_ap_thankyoupage' ) . '">'
 		. '<input type="hidden" name="cancel_return" value="' . get_option( 'ds_ap_cancelpage' ) . '">'
-		. '<input type="image" name="add" src="' . get_option( 'ds_ap_paypalbutton' ) . '">' // button graphic
+		. '<input type="image" name="add" src="' . esc_url( artpal_paypal_button_url() ) . '">' // button graphic
 		. '</form>';
 	}
 	return $button_html;

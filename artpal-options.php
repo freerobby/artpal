@@ -276,6 +276,11 @@ function artpal_sanitize_currency_code( $value ) {
  * @return array<string,string> Basename => URL.
  */
 function artpal_paypal_button_map() {
+	static $map = null;
+	if ( is_array( $map ) ) {
+		return $map;
+	}
+
 	$dir = dirname( __FILE__ ) . '/images/paypal';
 	$map = array();
 	if ( ! is_dir( $dir ) ) {
@@ -300,6 +305,62 @@ function artpal_paypal_button_map() {
 }
 
 /**
+ * Bundled button filename from a stored option value.
+ *
+ * Accepts a bare filename or an absolute URL saved by an older settings write.
+ *
+ * @param string $stored Option value.
+ * @return string Basename, or empty when none can be read.
+ */
+function artpal_paypal_button_file( $stored ) {
+	$stored = trim( (string) $stored );
+	if ( $stored === '' ) {
+		return '';
+	}
+	$path = parse_url( $stored, PHP_URL_PATH );
+	if ( is_string( $path ) && $path !== '' ) {
+		return basename( $path );
+	}
+	return basename( $stored );
+}
+
+/**
+ * URL to use for the PayPal button image right now.
+ *
+ * ds_ap_paypalbutton stores the address from the last time settings were saved.
+ * Hosts such as Flywheel rewrite plugin file URLs when their cache is flushed,
+ * so that saved address can 404 until the button is chosen again. Match the
+ * bundled filename and ask WordPress for the current URL instead.
+ *
+ * @param string|null $stored Stored option value. Null reads ds_ap_paypalbutton.
+ * @return string
+ */
+function artpal_paypal_button_url( $stored = null ) {
+	if ( null === $stored ) {
+		$stored = get_option( 'ds_ap_paypalbutton' );
+	}
+	$stored = trim( (string) $stored );
+	if ( $stored === '' ) {
+		return '';
+	}
+
+	$map = artpal_paypal_button_map();
+	if ( isset( $map[ $stored ] ) ) {
+		return $map[ $stored ];
+	}
+	if ( in_array( $stored, $map, true ) ) {
+		return $stored;
+	}
+
+	$file = artpal_paypal_button_file( $stored );
+	if ( $file !== '' && isset( $map[ $file ] ) ) {
+		return $map[ $file ];
+	}
+
+	return $stored;
+}
+
+/**
  * Accept only a bundled button image. Keep the stored URL if the post is unrecognized.
  *
  * @param mixed $value Posted button URL.
@@ -307,14 +368,14 @@ function artpal_paypal_button_map() {
  */
 function artpal_sanitize_paypal_button( $value ) {
 	$value = esc_url_raw( (string) wp_unslash( $value ) );
+	$url   = artpal_paypal_button_url( $value );
 	$map   = artpal_paypal_button_map();
-	if ( in_array( $value, $map, true ) ) {
-		return $value;
+	if ( $url !== '' && in_array( $url, $map, true ) ) {
+		return $url;
 	}
-	$path = parse_url( $value, PHP_URL_PATH );
-	$base = is_string( $path ) ? basename( $path ) : '';
-	if ( $base !== '' && isset( $map[ $base ] ) ) {
-		return $map[ $base ];
+	$existing = artpal_paypal_button_url();
+	if ( $existing !== '' && in_array( $existing, $map, true ) ) {
+		return $existing;
 	}
 	return (string) get_option( 'ds_ap_paypalbutton' );
 }
@@ -409,8 +470,7 @@ function artpal_field_currency() {
 function artpal_field_paypal_button() {
 	$map     = artpal_paypal_button_map();
 	$current = (string) get_option( 'ds_ap_paypalbutton' );
-	$path    = parse_url( $current, PHP_URL_PATH );
-	$base    = is_string( $path ) ? basename( $path ) : '';
+	$base    = artpal_paypal_button_file( $current );
 
 	if ( empty( $map ) ) {
 		echo '<p>No button images found in images/paypal/.</p>';
@@ -455,7 +515,9 @@ function artpal_render_options_page() {
 	}
 	echo '<div class="wrap">';
 	echo '<h1>ArtPal</h1>';
-	settings_errors();
+	// Pages under Settings already print this notice from options-head.php.
+	// Calling it again repeats the banner. The repeat only redisplays the
+	// in-memory list; option writes already finished before the redirect.
 	echo '<form action="options.php" method="post">';
 	settings_fields( 'artpal' );
 	do_settings_sections( 'artpal' );
