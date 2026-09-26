@@ -1,285 +1,464 @@
 <?php
-/*
-file:	artpal-options.php
+/**
+ * Settings → ArtPal. Settings API. Capability: manage_options.
+ *
+ * Keeps every existing ds_ap_* option. Adds ds_ap_notify_email and
+ * ds_ap_email_subject_prefix (both empty by default; add_option on activate).
+ */
 
-desc:	Options page for ArtPal Wordpress Plugin
-
-author:	Robby Grossman
-
-*/
-?>
-<?php
-// If the form was just submitted (options updated), ...
-if ( isset ( $_POST [ 'submitted' ] ) ) {
-	update_option ( 'ds_ap_unsoldcategory', htmlspecialchars ( $_POST [ 'unsold' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_soldcategory', htmlspecialchars ( $_POST [ 'sold' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_taxrate', htmlspecialchars ( $_POST [ 'taxrate' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_paypalemail', htmlspecialchars ( $_POST [ 'paypalemail' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_soldcode', htmlspecialchars ( $_POST [ 'soldcode' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_prebuttontext', htmlspecialchars ( $_POST [ 'prebuttontext' ] ) );
-	update_option ( 'ds_ap_thankyoupage', htmlspecialchars ( $_POST [ 'thankyoupage' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_cancelpage', htmlspecialchars ( $_POST [ 'cancelpage' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_paypalbutton', htmlspecialchars ( $_POST [ 'paypalbutton' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_discountpercent', htmlspecialchars ( $_POST [ 'discountpercent' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_disableecommerce', htmlspecialchars ( $_POST [ 'disableecommerce' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_textifunknownmetadata', htmlspecialchars ( $_POST [ 'textifunknownmetadata' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_saledisabledcategory', htmlspecialchars ( $_POST [ 'saledisabledcategory' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_textifsaledisabled', htmlspecialchars ( $_POST [ 'textifsaledisabled' ], ENT_QUOTES ) );
-	update_option ( 'ds_ap_currencycode4217', htmlspecialchars ( substr($_POST['currencycode4217'], 0, 3), ENT_QUOTES ) );
-	update_option ( 'ds_ap_currencysymbol', htmlspecialchars ( substr($_POST['currencycode4217'], 3), ENT_QUOTES ) );
-	update_option ( 'ds_ap_usesandbox', htmlspecialchars( $_POST['usesandbox'], ENT_QUOTES));
-	?>
-	<div id="message" class="updated fade">
-		<p>
-			<strong>
-				Options saved!
-			</strong>
-		</p>
-	</div>
-<?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
 }
-?>
 
-<div class="wrap">
-<form action="<?php echo $_SERVER ['REQUEST_URI']; ?>" method="post">
+add_action( 'admin_init', 'artpal_register_settings' );
 
-<?php
-// Get all category names and IDs
-$category_ids = get_all_category_ids ();
-$category_count = count ( $category_ids );
-$category_names = array ();
-for ( $i = 0; $i < $category_count; $i++ )
-	$category_names [] = get_cat_name ( $category_ids [ $i ] );
-?>
+/**
+ * Register each ArtPal option individually so activation never has to rewrite them.
+ *
+ * @return void
+ */
+function artpal_register_settings() {
+	$group = 'artpal';
 
-<h2>
-	General Options
-</h2>
+	$category = array( 'artpal_sanitize_category_id' );
+	$text     = array( 'artpal_sanitize_text_option' );
+	$html     = array( 'artpal_sanitize_html_option' );
+	$url      = array( 'artpal_sanitize_url_option' );
+	$email    = array( 'artpal_sanitize_email_option' );
+	$percent  = array( 'artpal_sanitize_percent' );
+	$flag     = array( 'artpal_sanitize_flag' );
 
-<h3>
-	ArtPal Options
-</h3>
+	$map = array(
+		'ds_ap_unsoldcategory'        => $category,
+		'ds_ap_soldcategory'          => $category,
+		'ds_ap_saledisabledcategory'  => $category,
+		'ds_ap_soldcode'              => $html,
+		'ds_ap_prebuttontext'         => $html,
+		'ds_ap_textifsaledisabled'    => $html,
+		'ds_ap_textifunknownmetadata' => $html,
+		'ds_ap_thankyoupage'          => $url,
+		'ds_ap_cancelpage'            => $url,
+		'ds_ap_paypalemail'           => $email,
+		'ds_ap_currencycode4217'      => array( 'artpal_sanitize_currency_code' ),
+		'ds_ap_paypalbutton'          => array( 'artpal_sanitize_paypal_button' ),
+		'ds_ap_taxrate'               => $percent,
+		'ds_ap_discountpercent'       => $percent,
+		'ds_ap_disableecommerce'      => $flag,
+		'ds_ap_usesandbox'            => $flag,
+		'ds_ap_notify_email'          => $email,
+		'ds_ap_email_subject_prefix'  => $text,
+	);
 
-<p>
-	Category that holds artwork available for sale: 
-	<select name="unsold">
-	<?php
-	for ( $thisCat = 0; $thisCat < $category_count; $thisCat ++ ) {
-		echo '<option value="';
-		echo $category_ids [ $thisCat ];
-		// Do we select it?
-		if ( $category_ids [ $thisCat ] == get_option ( 'ds_ap_unsoldcategory' ) ) {
-			echo '" selected="selected';
-		}
-		echo '">';
-		echo $category_names [ $thisCat ];
-		echo '</option>';
+	foreach ( $map as $key => $callback ) {
+		register_setting(
+			$group,
+			$key,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => $callback[0],
+				'show_in_rest'      => false,
+			)
+		);
 	}
-	?>
-	</select>
-</p>
 
-<p>
-	Category for "available" artwork that is currently disabled:
-	<select name="saledisabledcategory">
-		<option value="-1">(None)</option>
-	<?php
-	for ( $thisCat = 0; $thisCat < $category_count; $thisCat ++ ) {
-		echo '<option value="';
-		echo $category_ids [ $thisCat ];
-		// Do we select it?
-		if ( $category_ids [ $thisCat ] == get_option ( 'ds_ap_saledisabledcategory' ) ) {
-			echo '" selected="selected';
-		}
-		echo '">';
-		echo $category_names [ $thisCat ];
-		echo '</option>';
+	add_settings_section( 'artpal_categories', 'Categories', 'artpal_section_categories', 'artpal' );
+	add_settings_section( 'artpal_copy', 'Copy', 'artpal_section_noop', 'artpal' );
+	add_settings_section( 'artpal_pages', 'Pages', 'artpal_section_noop', 'artpal' );
+	add_settings_section( 'artpal_paypal', 'PayPal', 'artpal_section_paypal', 'artpal' );
+	add_settings_section( 'artpal_pricing', 'Pricing', 'artpal_section_noop', 'artpal' );
+	add_settings_section( 'artpal_notifications', 'Notifications', 'artpal_section_notifications', 'artpal' );
+
+	add_settings_field( 'ds_ap_unsoldcategory', 'Available category', 'artpal_field_category', 'artpal', 'artpal_categories', array(
+		'key'         => 'ds_ap_unsoldcategory',
+		'description' => 'Posts in this category can show a buy button.',
+	) );
+	add_settings_field( 'ds_ap_saledisabledcategory', 'Sale disabled category', 'artpal_field_category', 'artpal', 'artpal_categories', array(
+		'key'         => 'ds_ap_saledisabledcategory',
+		'allow_none'  => true,
+		'description' => 'Not Currently Available. Choose (None) if you do not use this.',
+	) );
+	add_settings_field( 'ds_ap_soldcategory', 'Sold category', 'artpal_field_category', 'artpal', 'artpal_categories', array(
+		'key'         => 'ds_ap_soldcategory',
+		'description' => 'ArtPal appends this category and removes Available when a piece sells.',
+	) );
+
+	add_settings_field( 'ds_ap_soldcode', 'Sold HTML', 'artpal_field_text', 'artpal', 'artpal_copy', array(
+		'key'         => 'ds_ap_soldcode',
+		'decode'      => true,
+		'description' => 'Shown instead of the buy button after the piece is sold.',
+	) );
+	add_settings_field( 'ds_ap_prebuttontext', 'Text before the button', 'artpal_field_text', 'artpal', 'artpal_copy', array(
+		'key'         => 'ds_ap_prebuttontext',
+		'decode'      => true,
+		'description' => 'Use _PRICE_ and _SHIPPING_. Shipping of 0 is shown as free.',
+	) );
+	add_settings_field( 'ds_ap_textifsaledisabled', 'Sale disabled text', 'artpal_field_text', 'artpal', 'artpal_copy', array(
+		'key'    => 'ds_ap_textifsaledisabled',
+		'decode' => true,
+	) );
+	add_settings_field( 'ds_ap_textifunknownmetadata', 'Missing price text', 'artpal_field_text', 'artpal', 'artpal_copy', array(
+		'key'         => 'ds_ap_textifunknownmetadata',
+		'decode'      => true,
+		'description' => 'Shown when the post is Available but artpal_price is empty.',
+	) );
+
+	add_settings_field( 'ds_ap_thankyoupage', 'Thank-you URL', 'artpal_field_text', 'artpal', 'artpal_pages', array(
+		'key'  => 'ds_ap_thankyoupage',
+		'type' => 'url',
+	) );
+	add_settings_field( 'ds_ap_cancelpage', 'Cancel URL', 'artpal_field_text', 'artpal', 'artpal_pages', array(
+		'key'  => 'ds_ap_cancelpage',
+		'type' => 'url',
+	) );
+
+	add_settings_field( 'ds_ap_paypalemail', 'PayPal email', 'artpal_field_text', 'artpal', 'artpal_paypal', array(
+		'key'  => 'ds_ap_paypalemail',
+		'type' => 'email',
+	) );
+	add_settings_field( 'ds_ap_currencycode4217', 'Currency', 'artpal_field_currency', 'artpal', 'artpal_paypal' );
+	add_settings_field( 'ds_ap_paypalbutton', 'Button image', 'artpal_field_paypal_button', 'artpal', 'artpal_paypal' );
+	add_settings_field( 'ds_ap_usesandbox', 'Sandbox', 'artpal_field_checkbox', 'artpal', 'artpal_paypal', array(
+		'key'   => 'ds_ap_usesandbox',
+		'label' => 'Use the PayPal sandbox. No live charges are processed.',
+	) );
+
+	add_settings_field( 'ds_ap_taxrate', 'Sales tax %', 'artpal_field_text', 'artpal', 'artpal_pricing', array(
+		'key'         => 'ds_ap_taxrate',
+		'class'       => 'small-text',
+		'description' => 'Percent applied to the item price only, not shipping.',
+	) );
+	add_settings_field( 'ds_ap_discountpercent', 'Storewide discount %', 'artpal_field_text', 'artpal', 'artpal_pricing', array(
+		'key'         => 'ds_ap_discountpercent',
+		'class'       => 'small-text',
+		'description' => 'Use 0 to turn the storewide sale off.',
+	) );
+	add_settings_field( 'ds_ap_disableecommerce', 'Disable checkout', 'artpal_field_checkbox', 'artpal', 'artpal_pricing', array(
+		'key'   => 'ds_ap_disableecommerce',
+		'label' => 'Show the price text and hide the PayPal button.',
+	) );
+
+	add_settings_field( 'ds_ap_notify_email', 'Notification email', 'artpal_field_text', 'artpal', 'artpal_notifications', array(
+		'key'         => 'ds_ap_notify_email',
+		'type'        => 'email',
+		'description' => 'Leave blank to use the PayPal email, then the site admin email.',
+	) );
+	add_settings_field( 'ds_ap_email_subject_prefix', 'Email subject prefix', 'artpal_field_text', 'artpal', 'artpal_notifications', array(
+		'key'         => 'ds_ap_email_subject_prefix',
+		'description' => 'Leave blank to use the site title. The subject is [Prefix] Sold: title.',
+	) );
+}
+
+/**
+ * @return void
+ */
+function artpal_section_noop() {
+}
+
+/**
+ * @return void
+ */
+function artpal_section_categories() {
+	echo '<p>Inventory state is these categories. Marking a piece sold removes Available and appends Sold. Other categories on the post stay.</p>';
+}
+
+/**
+ * @return void
+ */
+function artpal_section_paypal() {
+	echo '<p>Checkout is a PayPal Buy Now button. Instant Payment Notification URL:</p>';
+	echo '<p><code>' . esc_html( ipn_page_url() ) . '</code></p>';
+}
+
+/**
+ * @return void
+ */
+function artpal_section_notifications() {
+	echo '<p>Sent once, the first time a post moves to Sold.</p>';
+}
+
+/**
+ * @param mixed $value Posted category id.
+ * @return string
+ */
+function artpal_sanitize_category_id( $value ) {
+	return (string) intval( $value );
+}
+
+/**
+ * @param mixed $value Posted text.
+ * @return string
+ */
+function artpal_sanitize_text_option( $value ) {
+	return sanitize_text_field( wp_unslash( $value ) );
+}
+
+/**
+ * @param mixed $value Posted HTML.
+ * @return string
+ */
+function artpal_sanitize_html_option( $value ) {
+	return wp_kses_post( wp_unslash( $value ) );
+}
+
+/**
+ * @param mixed $value Posted URL.
+ * @return string
+ */
+function artpal_sanitize_url_option( $value ) {
+	return esc_url_raw( wp_unslash( $value ) );
+}
+
+/**
+ * @param mixed $value Posted email. Empty is allowed.
+ * @return string
+ */
+function artpal_sanitize_email_option( $value ) {
+	$value = trim( (string) wp_unslash( $value ) );
+	if ( $value === '' ) {
+		return '';
 	}
-	?>
-	</select>
-</p>
+	$clean = sanitize_email( $value );
+	return is_email( $clean ) ? $clean : '';
+}
 
-<p>
-	Category into which to move artwork when sold and label accordingly:
-	<select name="sold">
-	<?php
-	for ( $thisCat = 0; $thisCat < $category_count; $thisCat ++ ) {
-		echo '<option value="';
-		echo $category_ids [ $thisCat ];
-		// Do we select it?
-		if ( $category_ids [ $thisCat ] == get_option ( 'ds_ap_soldcategory' ) ) {
-			echo '" selected="selected';
-		}
-		echo '">';
-		echo $category_names [ $thisCat ];
-		echo '</option>';
+/**
+ * @param mixed $value Posted percent.
+ * @return string
+ */
+function artpal_sanitize_percent( $value ) {
+	$value = str_replace( ',', '.', trim( (string) wp_unslash( $value ) ) );
+	if ( $value === '' || ! is_numeric( $value ) ) {
+		return '0.00';
 	}
-	?>
-	</select>
-</p>
+	$number = (float) $value;
+	if ( $number < 0 ) {
+		$number = 0;
+	}
+	if ( $number > 100 ) {
+		$number = 100;
+	}
+	return number_format( $number, 2, '.', '' );
+}
 
-<p>
-	HTML Code to display for a sold item:
-	<br />
-	<input type="text" name="soldcode" size="100" value="<?php echo stripslashes ( get_option ( 'ds_ap_soldcode' ) ); ?>" />
-</p>
+/**
+ * @param mixed $value Posted flag.
+ * @return string
+ */
+function artpal_sanitize_flag( $value ) {
+	return ( (string) $value === '1' ) ? '1' : '0';
+}
 
-<p>
-	Generic text to place in every item for sale; _PRICE_ and _SHIPPING_ are metatags:
-	<br />
-	<input type="text" name="prebuttontext" size="100" value="<?php echo stripslashes ( get_option ( 'ds_ap_prebuttontext' ) ); ?>" />
-</p>
-
-<p>
-	Static text to use for "available" items that are temporarily not for sale:
-	<br />
-	<input type="text" name="textifsaledisabled" size="100" value="<?php echo stripslashes ( get_option ( 'ds_ap_textifsaledisabled' ) ); ?>" />
-</p>
-
-<p>
-	Static text to use in the event that you fail to specify pricing information for an item:
-	<br />
-	<input type="text" name="textifunknownmetadata" size="100" value="<?php echo stripslashes ( get_option ( 'ds_ap_textifunknownmetadata' ) ); ?>" />
-</p>
-
-<p>
-	URL of Thank You page:
-	<br />
-	<input type="text" name="thankyoupage" size="100" value="<?php echo stripslashes ( get_option ( 'ds_ap_thankyoupage' ) ); ?>" />
-</p>
-
-<p>
-	URL of Cancel Purchase page:
-	<br />
-	<input type="text" name="cancelpage" size="100" value="<?php echo stripslashes ( get_option ( 'ds_ap_cancelpage' ) ); ?>" />
-</p>
-
-<h2>
-	E-commerce
-</h2>
-<h3>
-	PayPal Options
-</h3>
-<p>
-	Email address that is tied to your PayPal account:
-	<input type="text" name="paypalemail" size="40" value="<?php echo stripslashes ( get_option ( 'ds_ap_paypalemail' ) ); ?>" />
-</p>
-<p>
-	Currency:
-	<select name="currencycode4217">
-	<?php
+/**
+ * Save the ISO currency code and the matching symbol option.
+ *
+ * @param mixed $value Posted ISO code.
+ * @return string
+ */
+function artpal_sanitize_currency_code( $value ) {
+	$code = strtoupper( substr( preg_replace( '/[^A-Za-z]/', '', (string) $value ), 0, 3 ) );
 	global $artpal_currencycodes;
-	for ( $thisCurrency = 0; $thisCurrency < count($artpal_currencycodes); $thisCurrency ++ ) {
-		echo '<option value="';
-		// Concatenate ISO code (3 digits) with symbol
-		echo $artpal_currencycodes[$thisCurrency][1] . $artpal_currencycodes[$thisCurrency][2];
-		// Do we select it?
-		if ( $artpal_currencycodes[$thisCurrency][1] == get_option ( 'ds_ap_currencycode4217' ) ) {
-			echo '" selected="selected';
+	if ( is_array( $artpal_currencycodes ) ) {
+		foreach ( $artpal_currencycodes as $row ) {
+			if ( isset( $row[1] ) && $row[1] === $code ) {
+				$symbol = isset( $row[2] ) ? $row[2] : '';
+				update_option( 'ds_ap_currencysymbol', $symbol );
+				return $code;
+			}
 		}
-		echo '">';
-		echo $artpal_currencycodes[$thisCurrency][0] . ' (' . $artpal_currencycodes[$thisCurrency][1] . '/' . $artpal_currencycodes[$thisCurrency][2] . ')';
-		echo '</option>';
 	}
-	?>
-	</select>
-</p>
+	$existing = get_option( 'ds_ap_currencycode4217' );
+	return is_string( $existing ) && $existing !== '' ? $existing : 'USD';
+}
 
-<p>
-	Please choose the graphic that you would like to use as a PayPal button.
-	<br />
-	<?php
-	// Get all files in our PayPal button directory.
-	$buttons = array ();
-	$handler = opendir ( ABSPATH . '/wp-content/plugins/artpal/images/paypal' );
-    // keep going until all files in directory have been read
-    while ($file = readdir($handler)) {
-        // if $file isn't this directory or its parent, 
-        // add it to the results array
-        if ($file != '.' && $file != '..') {
-        	// Make sure it's an image!
-        	$file_ext = substr ( $file, strlen ( $file ) - 4, 4 );
-        	if ( $file_ext == '.jpg' || $file_ext == '.gif' || $file_ext == '.png' )
-        	    $buttons[] = $file;
+/**
+ * Button image filenames in images/paypal/.
+ *
+ * @return array<string,string> Basename => URL.
+ */
+function artpal_paypal_button_map() {
+	$dir = dirname( __FILE__ ) . '/images/paypal';
+	$map = array();
+	if ( ! is_dir( $dir ) ) {
+		return $map;
+	}
+	$files = scandir( $dir );
+	if ( ! is_array( $files ) ) {
+		return $map;
+	}
+	natcasesort( $files );
+	foreach ( $files as $file ) {
+		if ( $file === '.' || $file === '..' ) {
+			continue;
 		}
-    }
-    // tidy up: close the handler
-    closedir($handler);
-	
-	// The number of images we have to choose from
-	$numFiles = count ( $buttons );
-	// Begin HTML table
-	echo '<table border="0" width="100%">';
-	// Number of columns to generate in our table
-	$numCols = 4;
-	for ( $i = 0; $i < $numFiles; $i ++ ) {
-		// Start new row if necessary
-		if ( $i % $numCols == 0 ) {
-			echo '<tr>';
+		$ext = strtolower( pathinfo( $file, PATHINFO_EXTENSION ) );
+		if ( ! in_array( $ext, array( 'gif', 'jpg', 'jpeg', 'png' ), true ) ) {
+			continue;
 		}
-		// Start new column
-		echo '<td>';
-		$url = get_option ( 'siteurl' ) . '/wp-content/plugins/artpal/images/paypal/' . basename ( $buttons [ $i ] );
-		echo '<input type="radio" name="paypalbutton" value="' . $url . '"';
-		if ( $url == get_option ( 'ds_ap_paypalbutton' ) ) {
-			echo ' checked="checked"';
+		$map[ $file ] = plugins_url( 'images/paypal/' . $file, __FILE__ );
+	}
+	return $map;
+}
+
+/**
+ * Accept only a bundled button image. Keep the stored URL if the post is unrecognized.
+ *
+ * @param mixed $value Posted button URL.
+ * @return string
+ */
+function artpal_sanitize_paypal_button( $value ) {
+	$value = esc_url_raw( (string) wp_unslash( $value ) );
+	$map   = artpal_paypal_button_map();
+	if ( in_array( $value, $map, true ) ) {
+		return $value;
+	}
+	$path = parse_url( $value, PHP_URL_PATH );
+	$base = is_string( $path ) ? basename( $path ) : '';
+	if ( $base !== '' && isset( $map[ $base ] ) ) {
+		return $map[ $base ];
+	}
+	return (string) get_option( 'ds_ap_paypalbutton' );
+}
+
+/**
+ * @param array $args Field args.
+ * @return void
+ */
+function artpal_field_category( $args ) {
+	$key     = $args['key'];
+	$current = (string) get_option( $key );
+	$cats    = get_categories(
+		array(
+			'hide_empty' => false,
+			'orderby'    => 'name',
+		)
+	);
+
+	echo '<select name="' . esc_attr( $key ) . '" id="' . esc_attr( $key ) . '">';
+	if ( ! empty( $args['allow_none'] ) ) {
+		echo '<option value="-1"' . selected( $current, '-1', false ) . '>' . esc_html( '(None)' ) . '</option>';
+	}
+	if ( is_array( $cats ) ) {
+		foreach ( $cats as $cat ) {
+			echo '<option value="' . esc_attr( (string) $cat->term_id ) . '"' . selected( $current, (string) $cat->term_id, false ) . '>';
+			echo esc_html( $cat->name );
+			echo '</option>';
 		}
-		echo ' />';
-		echo '<img src="' . $url . '" />';
-		// Close column
+	}
+	echo '</select>';
+	artpal_field_description( $args );
+}
+
+/**
+ * @param array $args Field args.
+ * @return void
+ */
+function artpal_field_text( $args ) {
+	$key   = $args['key'];
+	$value = get_option( $key );
+	if ( ! empty( $args['decode'] ) ) {
+		$value = htmlspecialchars_decode( stripslashes( (string) $value ) );
+	}
+	$type  = isset( $args['type'] ) ? $args['type'] : 'text';
+	$class = isset( $args['class'] ) ? $args['class'] : 'large-text';
+	printf(
+		'<input type="%1$s" class="%2$s" name="%3$s" id="%3$s" value="%4$s" />',
+		esc_attr( $type ),
+		esc_attr( $class ),
+		esc_attr( $key ),
+		esc_attr( $value )
+	);
+	artpal_field_description( $args );
+}
+
+/**
+ * @param array $args Field args.
+ * @return void
+ */
+function artpal_field_checkbox( $args ) {
+	$key = $args['key'];
+	$on  = (string) get_option( $key ) === '1' || get_option( $key ) === 1;
+	echo '<input type="hidden" name="' . esc_attr( $key ) . '" value="0" />';
+	echo '<label><input type="checkbox" name="' . esc_attr( $key ) . '" id="' . esc_attr( $key ) . '" value="1"' . checked( $on, true, false ) . ' /> ';
+	echo esc_html( isset( $args['label'] ) ? $args['label'] : '' );
+	echo '</label>';
+}
+
+/**
+ * @return void
+ */
+function artpal_field_currency() {
+	global $artpal_currencycodes;
+	$current = (string) get_option( 'ds_ap_currencycode4217' );
+	echo '<select name="ds_ap_currencycode4217" id="ds_ap_currencycode4217">';
+	if ( is_array( $artpal_currencycodes ) ) {
+		foreach ( $artpal_currencycodes as $row ) {
+			$code   = $row[1];
+			$symbol = isset( $row[2] ) ? html_entity_decode( $row[2], ENT_QUOTES, 'UTF-8' ) : '';
+			$label  = $row[0] . ' (' . $code . ( $symbol !== '' ? '/' . $symbol : '' ) . ')';
+			echo '<option value="' . esc_attr( $code ) . '"' . selected( $current, $code, false ) . '>' . esc_html( $label ) . '</option>';
+		}
+	}
+	echo '</select>';
+}
+
+/**
+ * Radio grid of images/paypal/*.
+ *
+ * @return void
+ */
+function artpal_field_paypal_button() {
+	$map     = artpal_paypal_button_map();
+	$current = (string) get_option( 'ds_ap_paypalbutton' );
+	$path    = parse_url( $current, PHP_URL_PATH );
+	$base    = is_string( $path ) ? basename( $path ) : '';
+
+	if ( empty( $map ) ) {
+		echo '<p>No button images found in images/paypal/.</p>';
+		return;
+	}
+
+	echo '<table class="widefat" style="max-width:920px"><tr>';
+	$i = 0;
+	foreach ( $map as $file => $url ) {
+		if ( $i > 0 && $i % 4 === 0 ) {
+			echo '</tr><tr>';
+		}
+		$is_current = ( $current === $url || $base === $file );
+		echo '<td style="text-align:center;vertical-align:bottom">';
+		echo '<label><input type="radio" name="ds_ap_paypalbutton" value="' . esc_attr( $url ) . '"' . checked( $is_current, true, false ) . ' />';
+		echo '<br /><img src="' . esc_url( $url ) . '" alt="' . esc_attr( $file ) . '" /></label>';
 		echo '</td>';
-		// Close row if necessary.
-		if ( $i % $numCols == $numCols - 1 ) {
-			echo '</tr>';
-		}
+		$i++;
 	}
-	echo '</table>';
-	?>
-</p>
+	echo '</tr></table>';
+}
 
-<h3>
-	Sales Tax
-</h3>
-<p>
-	Enter the sales tax rate you would like to apply to the products: 
-	<input type="text" name="taxrate" maxlength="2" size="2" value="<?php echo stripslashes ( get_option ( 'ds_ap_taxrate' ) ) ?>" /> &#37;
-</p>
+/**
+ * @param array $args Field args.
+ * @return void
+ */
+function artpal_field_description( $args ) {
+	if ( empty( $args['description'] ) ) {
+		return;
+	}
+	echo '<p class="description">' . esc_html( $args['description'] ) . '</p>';
+}
 
-<h3>
-	Store-wide Sale
-</h3>
-<p>
-	You may create a store-wide sale by specifying a <b>percent-based discount</b> on <b>all items in your store</b>:
-	<br />
-	Use 0 &#37; to disable a store-wide sale.
-	<br />
-	Enter discount: 
-	<input type="text" name="discountpercent" maxlength="2" size="2" value="<?php echo stripslashes ( get_option ( 'ds_ap_discountpercent' ) ) ?>" /> &#37;
-</p>
-
-<h3>
-	E-commerce Status
-</h3>
-<p>
-	You may turn off e-commerce at any time. This will disable your online store. Features relating to general options will still be in place, but your visitors will not be able to purchase your items through PayPal.
-	<br />
-	Check to disable ecommerce:
-	<input type="checkbox" name="disableecommerce" value="1" <?php if ( stripslashes ( get_option ( 'ds_ap_disableecommerce' ))) echo 'checked'; ?> />
-</p>
-
-<h3>
-  Sandbox Mode
-</h3>
-<p>
-  If you'd like to test your plugin, you may use sandbox mode. This will use the PayPal sandbox API (note: you will need to use a sandbox API account). No charges will be processed.
-  <br />
-  Check to use sandbox mode:
-  <input type="checkbox" name="usesandbox" value="1" <?php if ( stripslashes ( get_option ( 'ds_ap_usesandbox' ))) echo 'checked'; ?> />
-</p>
-
-<input type="submit" name="submitted" value="Update Options &raquo;" />
-
-<!-- End of Options Page -->
-	</form>
-</div>
-<!-- End of End of Options Page -->
+/**
+ * Settings page body.
+ *
+ * @return void
+ */
+function artpal_render_options_page() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+	echo '<div class="wrap">';
+	echo '<h1>ArtPal</h1>';
+	settings_errors();
+	echo '<form action="options.php" method="post">';
+	settings_fields( 'artpal' );
+	do_settings_sections( 'artpal' );
+	submit_button( 'Update Options' );
+	echo '</form></div>';
+}

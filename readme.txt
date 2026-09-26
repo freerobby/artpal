@@ -2,9 +2,9 @@
 Contributors: freerobby
 Donate link: http://freerobby.com/donate
 Tags: paypal, ecommerce, artists, sell
-Requires at least: 2.5
-Tested up to: 2.9.1
-Stable tag: 1.4
+Requires at least: 6.0
+Tested up to: 6.8
+Stable tag: 2.0.0
 
 ArtPal is a free (GPL) Wordpress plugin, originally written for Artists, to seemlessly integrate PayPal with their Wordpress blogs so that they can sell their work online.
 == Description ==
@@ -24,6 +24,18 @@ ArtPal's most important features are:
 1. Upload ./artpal directory to wp-content/plugins directory.
 2. Activate the plugin through the 'Plugins' menu in Wordpress.
 3. Configure as specified at [http://freerobby.com/artpal](http://freerobby.com/artpal).
+
+== Changelog ==
+
+= 2.0.0 =
+* Inventory API: artpal_mark_sold() is idempotent and uses wp_remove_object_terms / wp_set_object_terms (no raw SQL).
+* Helpers: artpal_is_sold, artpal_is_available, artpal_is_sale_disabled, artpal_get_price, artpal_get_shipping, artpal_effective_price.
+* [artpal=insert] is replaced on the_content. [artpal] and [artpal insert] are real shortcodes. "=" is not a valid shortcode name on current WordPress.
+* Post metabox for price, shipping, and read-only status.
+* Settings → ArtPal uses the Settings API (manage_options) and keeps every existing option.
+* Sold email uses the notification email, then the PayPal email, then the admin email. Subject prefix defaults to the site title.
+* PayPal IPN verifies over HTTPS and marks sold only after VERIFIED + Completed.
+* PayPal _xclick remains the checkout. The 2009 tag upgrader is hidden unless WP_DEBUG is on.
 
 == Frequently Asked Questions ==
 
