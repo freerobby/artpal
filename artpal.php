@@ -4,7 +4,7 @@ Plugin Name: ArtPal
 Plugin URI: http://freerobby.com/artpal
 Description: ArtPal allows artists to use WordPress to sell one-of-a-kind originals. When a piece sells, ArtPal stops showing a buy button, shows the sold HTML, and moves the post from the Available category to the Sold category.
 Author: Robby Grossman
-Version: 2.0.3
+Version: 2.0.4
 Requires at least: 6.0
 Requires PHP: 7.4
 Author URI: http://freerobby.com
@@ -35,6 +35,9 @@ register_deactivation_hook( __FILE__, 'ds_ap_uninstall' );
 add_action( 'admin_menu', 'ds_ap_add_pages' );
 // [artpal] and [artpal insert]. [artpal=insert] is not a valid shortcode tag on WP 4.4+.
 add_action( 'init', 'artpal_register_shortcodes' );
+// Buyer return hits the thank-you page from their browser. PayPal's own IPN
+// POST has not been reaching this host, so the return is what marks the post sold.
+add_action( 'init', 'artpal_maybe_handle_paypal_return', 1 );
 // String-replace [artpal=insert] before do_shortcode (priority 11).
 add_filter( 'the_content', 'ds_ap_parsecontent', 10 );
 add_action( 'add_meta_boxes', 'artpal_register_metabox' );
@@ -89,6 +92,7 @@ $ds_ap_options_names = array(
 	'ds_ap_usesandbox',
 	'ds_ap_notify_email',
 	'ds_ap_email_subject_prefix',
+	'ds_ap_pdt_token',
 );
 
 global $ds_ap_options_vals;
@@ -112,6 +116,7 @@ $ds_ap_options_vals = array(
 	'0',
 	'', // ds_ap_notify_email — empty means fall back to PayPal email, then admin_email
 	'', // ds_ap_email_subject_prefix — empty means the site title
+	'', // ds_ap_pdt_token — Payment Data Transfer identity token, optional
 );
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -652,6 +657,7 @@ function ds_ap_generatepaypalbutton( $selleremail, $itemname, $itemnumber, $pric
 		. '<input type="hidden" name="quantity" value="1">' // default 1 item
 		. '<input type="hidden" name="shipping" value="' . $shipping . '">' // shipping price of item
 		. '<input type="hidden" name="notify_url" value="' . esc_url( ipn_page_url() ) . '">'
+		. '<input type="hidden" name="rm" value="2">'
 		. '<input type="hidden" name="return" value="' . get_option( 'ds_ap_thankyoupage' ) . '">'
 		. '<input type="hidden" name="cancel_return" value="' . get_option( 'ds_ap_cancelpage' ) . '">'
 		. '<input type="image" name="add" src="' . esc_url( artpal_paypal_button_url() ) . '">' // button graphic
@@ -915,13 +921,13 @@ function artpal_paypal_ipn_postback( $request_body ) {
  */
 function artpal_version() {
 	if ( ! function_exists( 'get_file_data' ) ) {
-		return '2.0.3';
+		return '2.0.4';
 	}
 	$data = get_file_data( __FILE__, array( 'Version' => 'Version' ) );
 	if ( ! empty( $data['Version'] ) ) {
 		return (string) $data['Version'];
 	}
-	return '2.0.3';
+	return '2.0.4';
 }
 
 /**
@@ -1138,6 +1144,19 @@ function artpal_process_paypal_ipn( $post, $raw = '' ) {
 		return 'not_verified';
 	}
 
+	return artpal_apply_verified_paypal_payment( $fields, 'VERIFIED' );
+}
+
+/**
+ * Mark the post sold from fields PayPal has already verified.
+ *
+ * @param array  $fields IPN or PDT fields.
+ * @param string $detail Note stored with the last result.
+ * @return string Result code.
+ */
+function artpal_apply_verified_paypal_payment( $fields, $detail = 'VERIFIED' ) {
+	$fields = is_array( $fields ) ? $fields : array();
+
 	$status = isset( $fields['payment_status'] ) ? trim( (string) $fields['payment_status'] ) : '';
 	if ( strcasecmp( $status, 'Completed' ) !== 0 ) {
 		error_log( 'ArtPal IPN: payment_status is not Completed.' );
@@ -1184,8 +1203,181 @@ function artpal_process_paypal_ipn( $post, $raw = '' ) {
 		return 'not_sold';
 	}
 
-	artpal_ipn_remember_result( 'sold', $fields, 'VERIFIED' );
+	artpal_ipn_remember_result( 'sold', $fields, $detail );
 	return 'sold';
+}
+
+/**
+ * Path component of a URL or request, without a trailing slash.
+ *
+ * @param string $url URL or path.
+ * @return string
+ */
+function artpal_url_path( $url ) {
+	$path = parse_url( (string) $url, PHP_URL_PATH );
+	if ( ! is_string( $path ) || $path === '' ) {
+		return '';
+	}
+	return rtrim( $path, '/' );
+}
+
+/**
+ * @return string
+ */
+function artpal_request_path() {
+	$uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : '';
+	return artpal_url_path( $uri );
+}
+
+/**
+ * True when this request is the standalone ipn.php script.
+ *
+ * wp-load.php runs init, so the thank-you handler must not also treat an IPN POST.
+ *
+ * @return bool
+ */
+function artpal_is_direct_ipn_request() {
+	$script = isset( $_SERVER['SCRIPT_FILENAME'] ) ? (string) $_SERVER['SCRIPT_FILENAME'] : '';
+	if ( $script !== '' && substr( $script, -7 ) === 'ipn.php' ) {
+		return true;
+	}
+	$uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : '';
+	return strpos( $uri, 'ipn.php' ) !== false;
+}
+
+/**
+ * Ask PayPal to confirm a Payment Data Transfer token from the return URL.
+ *
+ * @param string $tx PDT transaction token (tx), not txn_id.
+ * @return array{ok:bool,fields?:array,error?:string}|null Null when no identity token is saved.
+ */
+function artpal_paypal_pdt_fetch( $tx ) {
+	$token = trim( (string) get_option( 'ds_ap_pdt_token' ) );
+	$tx    = trim( (string) $tx );
+	if ( $token === '' || $tx === '' ) {
+		return null;
+	}
+
+	if ( isset( $GLOBALS['artpal_test'] ) && is_array( $GLOBALS['artpal_test'] ) && array_key_exists( 'pdt_response', $GLOBALS['artpal_test'] ) ) {
+		$text = (string) $GLOBALS['artpal_test']['pdt_response'];
+	} else {
+		$response = wp_remote_post(
+			'https://' . get_paypal_domain() . '/cgi-bin/webscr',
+			array(
+				'timeout'     => 45,
+				'httpversion' => '1.1',
+				'headers'     => array(
+					'Content-Type' => 'application/x-www-form-urlencoded',
+					'Connection'   => 'Close',
+					'User-Agent'   => 'ArtPal/' . artpal_version(),
+				),
+				'body'        => 'cmd=_notify-synch&tx=' . rawurlencode( $tx ) . '&at=' . rawurlencode( $token ),
+			)
+		);
+		if ( is_wp_error( $response ) ) {
+			return array( 'ok' => false, 'error' => 'transport' );
+		}
+		$text = (string) wp_remote_retrieve_body( $response );
+	}
+
+	$lines = preg_split( "/\r\n|\n|\r/", trim( $text ) );
+	if ( ! is_array( $lines ) || ! isset( $lines[0] ) || strcasecmp( trim( $lines[0] ), 'SUCCESS' ) !== 0 ) {
+		$snippet = trim( preg_replace( '/\s+/', ' ', $text ) );
+		return array( 'ok' => false, 'error' => substr( $snippet, 0, 180 ) );
+	}
+
+	$fields = array();
+	$count  = count( $lines );
+	for ( $i = 1; $i < $count; $i++ ) {
+		$parts = explode( '=', $lines[ $i ], 2 );
+		if ( count( $parts ) !== 2 ) {
+			continue;
+		}
+		$fields[ urldecode( $parts[0] ) ] = urldecode( $parts[1] );
+	}
+	return array( 'ok' => true, 'fields' => $fields );
+}
+
+/**
+ * Confirm a buyer landing on the thank-you page and mark the post sold.
+ *
+ * PayPal posts the payment variables here when the button sends rm=2. That
+ * request comes from the buyer's browser. The IPN request comes from PayPal
+ * and has not been arriving on this host.
+ *
+ * @param array $fields Return fields from POST and GET.
+ * @return string Result code, or empty when there is nothing to confirm.
+ */
+function artpal_handle_paypal_return_fields( $fields ) {
+	$fields = is_array( $fields ) ? $fields : array();
+	if ( empty( $fields['payment_status'] ) && ! empty( $fields['st'] ) ) {
+		$fields['payment_status'] = (string) $fields['st'];
+	}
+
+	$tx = isset( $fields['tx'] ) ? trim( (string) $fields['tx'] ) : '';
+	if ( $tx !== '' && trim( (string) get_option( 'ds_ap_pdt_token' ) ) !== '' ) {
+		$synced = artpal_paypal_pdt_fetch( $tx );
+		if ( is_array( $synced ) && ! empty( $synced['ok'] ) && ! empty( $synced['fields'] ) ) {
+			return artpal_apply_verified_paypal_payment( $synced['fields'], 'PDT' );
+		}
+		$pdt_error = is_array( $synced ) && isset( $synced['error'] ) ? (string) $synced['error'] : 'pdt';
+		artpal_ipn_remember_result( 'pdt_failed', $fields, $pdt_error );
+	}
+
+	if ( empty( $fields['item_number'] ) || empty( $fields['txn_id'] ) || empty( $fields['payment_status'] ) ) {
+		if ( $tx !== '' || ! empty( $fields['item_number'] ) || ! empty( $fields['st'] ) ) {
+			artpal_ipn_remember_result( 'return_incomplete', $fields, 'thank-you return was missing payment fields' );
+			return 'return_incomplete';
+		}
+		return 'empty';
+	}
+
+	return artpal_process_paypal_ipn( $fields, '' );
+}
+
+/**
+ * init callback. No-op except on the configured thank-you URL with PayPal fields.
+ *
+ * @return void
+ */
+function artpal_maybe_handle_paypal_return() {
+	if ( artpal_is_direct_ipn_request() ) {
+		return;
+	}
+	$thank = artpal_url_path( (string) get_option( 'ds_ap_thankyoupage' ) );
+	$path  = artpal_request_path();
+	if ( $thank === '' || $path === '' || $thank !== $path ) {
+		return;
+	}
+
+	$fields = array();
+	if ( isset( $_POST ) && is_array( $_POST ) && ! empty( $_POST ) ) {
+		$fields = wp_unslash( $_POST );
+	}
+	if ( isset( $_GET ) && is_array( $_GET ) ) {
+		foreach ( wp_unslash( $_GET ) as $key => $value ) {
+			if ( ! is_string( $key ) || is_array( $value ) ) {
+				continue;
+			}
+			if ( ! isset( $fields[ $key ] ) || $fields[ $key ] === '' ) {
+				$fields[ $key ] = $value;
+			}
+		}
+	}
+
+	$interesting = array( 'item_number', 'txn_id', 'tx', 'payment_status', 'st', 'verify_sign' );
+	$any         = false;
+	foreach ( $interesting as $key ) {
+		if ( ! empty( $fields[ $key ] ) ) {
+			$any = true;
+			break;
+		}
+	}
+	if ( ! $any ) {
+		return;
+	}
+
+	artpal_handle_paypal_return_fields( $fields );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
