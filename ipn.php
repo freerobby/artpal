@@ -63,6 +63,13 @@ if ( ! defined( 'WP_USE_THEMES' ) ) {
 	define( 'WP_USE_THEMES', false );
 }
 
+// Flywheel/Fastly will cache a bare 200 from this URL and can replay that
+// empty response to PayPal's POST, so the category never changes.
+header( 'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0' );
+header( 'Pragma: no-cache' );
+header( 'Expires: Wed, 11 Jan 1984 05:00:00 GMT' );
+header( 'X-Robots-Tag: noindex, nofollow' );
+
 $artpal_ipn_raw = file_get_contents( 'php://input' );
 if ( ! is_string( $artpal_ipn_raw ) ) {
 	$artpal_ipn_raw = '';
@@ -76,6 +83,17 @@ if ( $artpal_wp_load === '' ) {
 }
 
 require $artpal_wp_load;
+
+if ( function_exists( 'nocache_headers' ) ) {
+	nocache_headers();
+}
+
+if ( isset( $_GET['artpal_diag'] ) && (string) $_GET['artpal_diag'] === '1' ) {
+	header( 'Content-Type: application/json; charset=utf-8' );
+	$artpal_ipn_last = get_option( 'artpal_ipn_last', array() );
+	echo function_exists( 'wp_json_encode' ) ? wp_json_encode( $artpal_ipn_last ) : json_encode( $artpal_ipn_last );
+	exit;
+}
 
 if ( ! function_exists( 'artpal_handle_paypal_ipn' ) ) {
 	if ( function_exists( 'status_header' ) ) {
