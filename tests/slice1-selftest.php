@@ -437,7 +437,7 @@ $GLOBALS['artpal_test']['ipn_postback'] = 'INVALID';
 $GLOBALS['artpal_test']['ipn_requests'] = array();
 artpal_assert( artpal_process_paypal_ipn( $ipn_post, 'payment_status=Completed' ) === 'not_verified', 'INVALID IPN does not mark sold' );
 artpal_assert( ! artpal_is_sold( 50 ), 'post stays available after INVALID IPN' );
-artpal_assert( isset( $GLOBALS['artpal_test']['ipn_requests'][0] ) && strpos( $GLOBALS['artpal_test']['ipn_requests'][0], 'cmd=_notify-validate' ) === 0, 'IPN postback starts with cmd=_notify-validate' );
+artpal_assert( isset( $GLOBALS['artpal_test']['ipn_requests'][0] ) && $GLOBALS['artpal_test']['ipn_requests'][0] === 'cmd=_notify-validate&payment_status=Completed', 'first IPN postback is the original bytes' );
 
 $GLOBALS['artpal_test']['ipn_postback'] = "VERIFIED\n";
 artpal_test_seed_post( 53, array( 5 ), '1', '1', 'Pending piece' );
@@ -487,6 +487,22 @@ artpal_assert( artpal_is_sold( 52 ), 'raw-body IPN post is sold' );
 $raw_last = get_option( 'artpal_ipn_last' );
 artpal_assert( is_array( $raw_last ) && $raw_last['result'] === 'sold' && $raw_last['item_number'] === '52' && $raw_last['txn_id'] === 'txn_raw_only', 'last IPN result is stored without requiring POST' );
 artpal_assert( ! isset( $raw_last['payer_email'] ), 'stored IPN result omits the buyer email' );
+artpal_assert( is_array( $raw_last['keys'] ) && in_array( 'receiver_email', $raw_last['keys'], true ) && in_array( 'item_number', $raw_last['keys'], true ), 'diagnostic lists the field names that arrived' );
+artpal_assert( (int) $raw_last['raw_bytes'] > 0 && $raw_last['verify_host'] === 'ipnpb.paypal.com', 'diagnostic records the raw size and verify host' );
+
+$_POST = array( 'item_number' => '1' );
+$GLOBALS['artpal_test']['ipn_requests'] = array();
+artpal_test_seed_post( 56, array( 5 ), '1', '1', 'Early snapshot' );
+artpal_handle_paypal_ipn(
+	'',
+	array(
+		'receiver_email' => 'seller@example.com',
+		'item_number'    => '56',
+	)
+);
+artpal_assert( artpal_is_sold( 56 ), 'IPN uses the field snapshot taken before WordPress loads' );
+artpal_assert( strpos( implode( "\n", $GLOBALS['artpal_test']['ipn_requests'] ), 'receiver_email=seller%40example.com' ) !== false, 'verification postback includes receiver_email from the snapshot' );
+$_POST = array();
 
 $missing = $ipn_post;
 $missing['item_number'] = '99999';
@@ -573,8 +589,10 @@ artpal_assert( strpos( $ipn, 'wp-load.php' ) !== false && strpos( $ipn, 'wp-blog
 artpal_assert( strpos( $ipn, '/../../../wp-load.php' ) === false, 'ipn.php does not probe wp-load.php through a dot-dot path' );
 artpal_assert( strpos( $ipn, '.wordpress/wp-load.php' ) !== false, 'ipn.php looks for Flywheel .wordpress/wp-load.php' );
 $raw_pos  = strpos( $ipn, "file_get_contents( 'php://input' )" );
+$post_pos = strpos( $ipn, '$_POST' );
 $load_pos = strpos( $ipn, 'require $artpal_wp_load' );
 artpal_assert( $raw_pos !== false && $load_pos !== false && $raw_pos < $load_pos, 'ipn.php reads the body before loading WordPress' );
+artpal_assert( $post_pos !== false && $post_pos < $load_pos, 'ipn.php copies $_POST before loading WordPress' );
 artpal_assert( strpos( $plugin, "get_option( 'siteurl' ) . '/wp-content/plugins/artpal/ipn.php'" ) === false, 'notify URL is not hardcoded to the artpal directory' );
 artpal_assert( stripos( $plugin, 'stripe' ) === false && stripos( $ipn, 'stripe' ) === false && stripos( $opts, 'stripe' ) === false, 'no Stripe code' );
 artpal_assert( strpos( $plugin, 'admin-functions.php' ) === false, 'admin-functions.php require is gone' );
@@ -598,7 +616,7 @@ $GLOBALS['artpal_test']['options']['ds_ap_paypalbutton'] = $stale_button;
 $html = artpal_render_buy_now( 80 );
 artpal_assert( strpos( $html, 'src="' . $button_map['btn_buynow_LG.gif'] . '"' ) !== false, 'checkout uses the live button URL when the option is stale' );
 artpal_assert( strpos( $html, 'getflywheel.com' ) === false, 'checkout does not keep the stale button host' );
-artpal_assert( strpos( $plugin, 'Version: 2.0.4' ) !== false, 'plugin patch version is 2.0.4' );
+artpal_assert( strpos( $plugin, 'Version: 2.0.5' ) !== false, 'plugin patch version is 2.0.5' );
 artpal_assert( strpos( $plugin, "strcasecmp( \$status, 'Completed' )" ) === false, 'IPN does not require payment_status Completed' );
 
 if ( ! defined( 'ARTPAL_IPN_LIBRARY' ) ) {

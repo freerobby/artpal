@@ -4,7 +4,7 @@ Plugin Name: ArtPal
 Plugin URI: http://freerobby.com/artpal
 Description: ArtPal allows artists to use WordPress to sell one-of-a-kind originals. When a piece sells, ArtPal stops showing a buy button, shows the sold HTML, and moves the post from the Available category to the Sold category.
 Author: Robby Grossman
-Version: 2.0.4
+Version: 2.0.5
 Requires at least: 6.0
 Requires PHP: 7.4
 Author URI: http://freerobby.com
@@ -881,8 +881,50 @@ function artpal_paypal_ipn_postback( $request_body ) {
 		return $GLOBALS['artpal_test']['ipn_postback'];
 	}
 
+	$url = artpal_paypal_webscr_url();
+
+	// Curl sends the body unchanged. wp_remote_post runs it through WordPress
+	// HTTP filters, which can drop or re-encode fields. PayPal then returns
+	// INVALID because the message no longer matches the notification.
+	if ( function_exists( 'curl_init' ) ) {
+		$handle = curl_init( $url );
+		if ( $handle === false ) {
+			return new WP_Error( 'artpal_ipn_http', 'PayPal IPN verification could not start.' );
+		}
+		curl_setopt( $handle, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1 );
+		curl_setopt( $handle, CURLOPT_POST, true );
+		curl_setopt( $handle, CURLOPT_RETURNTRANSFER, true );
+		curl_setopt( $handle, CURLOPT_POSTFIELDS, $request_body );
+		curl_setopt( $handle, CURLOPT_SSL_VERIFYPEER, true );
+		curl_setopt( $handle, CURLOPT_SSL_VERIFYHOST, 2 );
+		curl_setopt( $handle, CURLOPT_FORBID_REUSE, true );
+		curl_setopt( $handle, CURLOPT_FRESH_CONNECT, true );
+		curl_setopt( $handle, CURLOPT_FOLLOWLOCATION, false );
+		curl_setopt( $handle, CURLOPT_CONNECTTIMEOUT, 30 );
+		curl_setopt( $handle, CURLOPT_TIMEOUT, 45 );
+		curl_setopt(
+			$handle,
+			CURLOPT_HTTPHEADER,
+			array(
+				'Connection: Close',
+				'Content-Type: application/x-www-form-urlencoded',
+			)
+		);
+		$body  = curl_exec( $handle );
+		$errno = curl_errno( $handle );
+		$code  = (int) curl_getinfo( $handle, CURLINFO_HTTP_CODE );
+		curl_close( $handle );
+		if ( 0 !== $errno || ! is_string( $body ) ) {
+			return new WP_Error( 'artpal_ipn_http', 'PayPal IPN verification request failed.' );
+		}
+		if ( $code < 200 || $code >= 300 ) {
+			return new WP_Error( 'artpal_ipn_http', 'PayPal IPN verification returned HTTP ' . $code );
+		}
+		return trim( $body );
+	}
+
 	$response = wp_remote_post(
-		artpal_paypal_webscr_url(),
+		$url,
 		array(
 			'timeout'     => 45,
 			'httpversion' => '1.1',
@@ -891,7 +933,6 @@ function artpal_paypal_ipn_postback( $request_body ) {
 			'headers'     => array(
 				'Content-Type' => 'application/x-www-form-urlencoded',
 				'Connection'   => 'Close',
-				'User-Agent'   => 'ArtPal/' . artpal_version(),
 			),
 			'body'        => $request_body,
 		)
@@ -910,19 +951,19 @@ function artpal_paypal_ipn_postback( $request_body ) {
 }
 
 /**
- * Plugin header version, used as the IPN verification User-Agent.
+ * Plugin header version.
  *
  * @return string
  */
 function artpal_version() {
 	if ( ! function_exists( 'get_file_data' ) ) {
-		return '2.0.4';
+		return '2.0.5';
 	}
 	$data = get_file_data( __FILE__, array( 'Version' => 'Version' ) );
 	if ( ! empty( $data['Version'] ) ) {
 		return (string) $data['Version'];
 	}
-	return '2.0.4';
+	return '2.0.5';
 }
 
 /**
@@ -972,7 +1013,8 @@ function artpal_ipn_encode_fields( $fields ) {
 		if ( is_array( $value ) ) {
 			continue;
 		}
-		$parts[] = urlencode( (string) $key ) . '=' . urlencode( (string) $value );
+		// 1.4 urlencoded the value only. PayPal's field names are plain tokens.
+		$parts[] = (string) $key . '=' . urlencode( (string) $value );
 	}
 	return implode( '&', $parts );
 }
@@ -1016,6 +1058,15 @@ function artpal_ipn_email_matches( $fields ) {
  */
 function artpal_ipn_remember_result( $code, $fields, $detail = '' ) {
 	$fields = is_array( $fields ) ? $fields : array();
+	$keys = array();
+	foreach ( $fields as $key => $value ) {
+		unset( $value );
+		$keys[] = substr( (string) $key, 0, 40 );
+		if ( count( $keys ) >= 60 ) {
+			break;
+		}
+	}
+	$meta = isset( $GLOBALS['artpal_ipn_meta'] ) && is_array( $GLOBALS['artpal_ipn_meta'] ) ? $GLOBALS['artpal_ipn_meta'] : array();
 	update_option(
 		'artpal_ipn_last',
 		array(
@@ -1027,6 +1078,10 @@ function artpal_ipn_remember_result( $code, $fields, $detail = '' ) {
 			'receiver_email'  => isset( $fields['receiver_email'] ) ? (string) $fields['receiver_email'] : '',
 			'business'        => isset( $fields['business'] ) ? (string) $fields['business'] : '',
 			'expected_email'  => (string) get_option( 'ds_ap_paypalemail' ),
+			'keys'            => $keys,
+			'raw_bytes'       => isset( $meta['raw_bytes'] ) ? (int) $meta['raw_bytes'] : 0,
+			'content_length'  => isset( $meta['content_length'] ) ? (int) $meta['content_length'] : 0,
+			'verify_host'     => isset( $meta['verify_host'] ) ? (string) $meta['verify_host'] : '',
 			'detail'          => substr( preg_replace( '/\s+/', ' ', (string) $detail ), 0, 180 ),
 		),
 		false
@@ -1036,10 +1091,9 @@ function artpal_ipn_remember_result( $code, $fields, $detail = '' ) {
 /**
  * Bodies to post back to PayPal.
  *
- * 1.4 sent cmd=_notify-validate first, then each posted field with urlencode
- * (spaces as "+"). That rebuilt body goes first. The original bytes go next,
- * because current PayPal answers VERIFIED only when the postback matches the
- * notification it sent.
+ * The original bytes go first. PayPal returns VERIFIED only when the postback
+ * matches the notification it sent. The 1.4 rebuild (cmd first, urlencoded
+ * values) covers a host where php://input is empty.
  *
  * @param string $raw    Original body.
  * @param array  $fields Decoded fields.
@@ -1049,11 +1103,13 @@ function artpal_ipn_validation_bodies( $raw, $fields ) {
 	$bodies  = array();
 	$raw     = is_string( $raw ) ? $raw : '';
 	$encoded = artpal_ipn_encode_fields( $fields );
+	if ( $raw !== '' && strpos( $raw, '=' ) !== false ) {
+		$bodies[] = 'cmd=_notify-validate&' . $raw;
+	}
 	if ( $encoded !== '' ) {
 		$bodies[] = 'cmd=_notify-validate&' . $encoded;
 	}
 	if ( $raw !== '' && strpos( $raw, '=' ) !== false ) {
-		$bodies[] = 'cmd=_notify-validate&' . $raw;
 		$bodies[] = $raw . '&cmd=_notify-validate';
 	}
 	if ( $encoded !== '' ) {
@@ -1065,13 +1121,15 @@ function artpal_ipn_validation_bodies( $raw, $fields ) {
 /**
  * Entry from ipn.php. Uses the raw body for verification and field checks.
  *
- * ipn.php reads php://input before WordPress boots and passes that string in.
- * Reading it again here would see an empty stream.
+ * ipn.php reads php://input and copies $_POST before WordPress boots.
+ * Reading the stream again here would see an empty body, and $_POST may
+ * already have lost receiver_email.
  *
- * @param string|null $raw Original request body, when the front controller already read it.
+ * @param string|null $raw  Original request body, when the front controller already read it.
+ * @param array|null  $post Original $_POST, copied before WordPress loads. Null reads $_POST now.
  * @return void
  */
-function artpal_handle_paypal_ipn( $raw = null ) {
+function artpal_handle_paypal_ipn( $raw = null, $post = null ) {
 	if ( function_exists( 'nocache_headers' ) ) {
 		nocache_headers();
 	}
@@ -1081,13 +1139,13 @@ function artpal_handle_paypal_ipn( $raw = null ) {
 	if ( ! is_string( $raw ) ) {
 		$raw = '';
 	}
-	$post = ( isset( $_POST ) && is_array( $_POST ) ) ? wp_unslash( $_POST ) : array();
-	$result = artpal_process_paypal_ipn( $post, $raw );
-	if ( 'transport_error' === $result ) {
-		status_header( 500 );
-		return;
+	if ( ! is_array( $post ) ) {
+		$post = ( isset( $_POST ) && is_array( $_POST ) ) ? wp_unslash( $_POST ) : array();
 	}
-	status_header( 200 );
+	$result = artpal_process_paypal_ipn( $post, $raw );
+	if ( function_exists( 'status_header' ) ) {
+		status_header( 'transport_error' === $result ? 500 : 200 );
+	}
 }
 
 /**
@@ -1105,13 +1163,27 @@ function artpal_process_paypal_ipn( $post, $raw = '' ) {
 		return 'empty';
 	}
 
-	// The raw body is what PayPal signed. $_POST can be empty or missing keys
-	// after the stream is read, so decoded raw fields win when they exist.
-	$fields = $post;
-	$from_raw = artpal_ipn_parse_raw( $raw );
-	if ( ! empty( $from_raw ) ) {
-		$fields = array_merge( $fields, $from_raw );
+	// Raw bytes win when they carry a value. An empty raw value must not wipe
+	// a field that PHP already parsed into $_POST, and the other way around.
+	$fields = array();
+	foreach ( $post as $key => $value ) {
+		if ( is_array( $value ) ) {
+			continue;
+		}
+		$fields[ (string) $key ] = (string) $value;
 	}
+	foreach ( artpal_ipn_parse_raw( $raw ) as $key => $value ) {
+		if ( $value === '' && isset( $fields[ $key ] ) && $fields[ $key ] !== '' ) {
+			continue;
+		}
+		$fields[ $key ] = $value;
+	}
+	$host = parse_url( artpal_paypal_webscr_url(), PHP_URL_HOST );
+	$GLOBALS['artpal_ipn_meta'] = array(
+		'raw_bytes'      => strlen( $raw ),
+		'content_length' => isset( $_SERVER['CONTENT_LENGTH'] ) ? (int) $_SERVER['CONTENT_LENGTH'] : 0,
+		'verify_host'    => is_string( $host ) ? $host : '',
+	);
 
 	$bodies = artpal_ipn_validation_bodies( $raw, $fields );
 	$saw_http = false;

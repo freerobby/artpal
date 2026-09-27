@@ -4,7 +4,7 @@ Donate link: http://freerobby.com/donate
 Tags: paypal, ecommerce, artists, sell
 Requires at least: 6.0
 Tested up to: 6.8
-Stable tag: 2.0.4
+Stable tag: 2.0.5
 
 ArtPal is a free (GPL) Wordpress plugin, originally written for Artists, to seemlessly integrate PayPal with their Wordpress blogs so that they can sell their work online.
 == Description ==
@@ -26,6 +26,10 @@ ArtPal's most important features are:
 3. Configure as specified at [http://freerobby.com/artpal](http://freerobby.com/artpal).
 
 == Changelog ==
+
+= 2.0.5 =
+* PayPal answered INVALID for a completed payment, and the saved notification had an empty receiver_email and business. The postback is the original message again: ipn.php copies $_POST and the raw body before WordPress loads, then posts that message back with curl. A plugin can no longer drop those fields before the check, and WordPress HTTP filters can no longer rewrite the body.
+* The diagnostic at ipn.php?artpal_diag=1 also lists the field names that arrived, the raw body size, and the PayPal host used for the check.
 
 = 2.0.4 =
 * A verified PayPal IPN moves the post from Available to Sold the way 1.4 did. The listener no longer waits for payment_status Completed or a txn_id. It still requires PayPal to answer VERIFIED and the receiver address to match the PayPal email in the settings.

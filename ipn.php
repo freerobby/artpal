@@ -59,6 +59,24 @@ if ( defined( 'ARTPAL_IPN_LIBRARY' ) && ARTPAL_IPN_LIBRARY ) {
 	return;
 }
 
+// Capture the notification before WordPress boots. php://input can be read
+// only once, and a plugin loaded with core can remove fields such as
+// receiver_email from $_POST. PayPal answers INVALID unless the postback
+// is the original message.
+$artpal_ipn_raw = file_get_contents( 'php://input' );
+if ( ! is_string( $artpal_ipn_raw ) ) {
+	$artpal_ipn_raw = '';
+}
+$artpal_ipn_post = array();
+if ( isset( $_POST ) && is_array( $_POST ) ) {
+	foreach ( $_POST as $artpal_ipn_key => $artpal_ipn_value ) {
+		if ( is_array( $artpal_ipn_value ) ) {
+			continue;
+		}
+		$artpal_ipn_post[ (string) $artpal_ipn_key ] = (string) $artpal_ipn_value;
+	}
+}
+
 if ( ! defined( 'WP_USE_THEMES' ) ) {
 	define( 'WP_USE_THEMES', false );
 }
@@ -69,11 +87,6 @@ header( 'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0'
 header( 'Pragma: no-cache' );
 header( 'Expires: Wed, 11 Jan 1984 05:00:00 GMT' );
 header( 'X-Robots-Tag: noindex, nofollow' );
-
-$artpal_ipn_raw = file_get_contents( 'php://input' );
-if ( ! is_string( $artpal_ipn_raw ) ) {
-	$artpal_ipn_raw = '';
-}
 
 $artpal_wp_load = artpal_find_wp_load();
 if ( $artpal_wp_load === '' ) {
@@ -105,4 +118,4 @@ if ( ! function_exists( 'artpal_handle_paypal_ipn' ) ) {
 	exit;
 }
 
-artpal_handle_paypal_ipn( $artpal_ipn_raw );
+artpal_handle_paypal_ipn( $artpal_ipn_raw, $artpal_ipn_post );
