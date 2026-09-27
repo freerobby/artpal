@@ -4,7 +4,7 @@ Plugin Name: ArtPal
 Plugin URI: http://freerobby.com/artpal
 Description: ArtPal allows artists to use WordPress to sell one-of-a-kind originals. When a piece sells, ArtPal stops showing a buy button, shows the sold HTML, and moves the post from the Available category to the Sold category.
 Author: Robby Grossman
-Version: 2.0.3
+Version: 2.0.4
 Requires at least: 6.0
 Requires PHP: 7.4
 Author URI: http://freerobby.com
@@ -126,8 +126,9 @@ function get_paypal_domain() {
 }
 
 function ipn_page_url() {
-	// Query string keeps this off a cached empty response for the bare ipn.php URL.
-	return plugins_url( 'ipn.php', __FILE__ ) . '?artpal-ipn=1';
+	// Same shape as 1.4 (the ipn.php script, no query string). plugins_url()
+	// follows the real directory, so a folder named artpal-master still works.
+	return plugins_url( 'ipn.php', __FILE__ );
 }
 
 // Define our configuration pages
@@ -915,13 +916,13 @@ function artpal_paypal_ipn_postback( $request_body ) {
  */
 function artpal_version() {
 	if ( ! function_exists( 'get_file_data' ) ) {
-		return '2.0.3';
+		return '2.0.4';
 	}
 	$data = get_file_data( __FILE__, array( 'Version' => 'Version' ) );
 	if ( ! empty( $data['Version'] ) ) {
 		return (string) $data['Version'];
 	}
-	return '2.0.3';
+	return '2.0.4';
 }
 
 /**
@@ -979,8 +980,9 @@ function artpal_ipn_encode_fields( $fields ) {
 /**
  * PayPal account emails on this notification.
  *
- * receiver_email is the account's primary address. business is the address
- * on the button, which is what ArtPal stores. Either one is this seller.
+ * 1.4 compared urldecode(receiver_email) to the PayPal email option. business
+ * is the address on the button, which is the value ArtPal stores, so a match
+ * on either address is this seller.
  *
  * @param array $fields IPN fields.
  * @return bool
@@ -994,7 +996,7 @@ function artpal_ipn_email_matches( $fields ) {
 		if ( empty( $fields[ $key ] ) ) {
 			continue;
 		}
-		$candidate = strtolower( trim( html_entity_decode( (string) $fields[ $key ], ENT_QUOTES ) ) );
+		$candidate = strtolower( urldecode( trim( html_entity_decode( (string) $fields[ $key ], ENT_QUOTES ) ) ) );
 		if ( $candidate === $expected ) {
 			return true;
 		}
@@ -1032,25 +1034,29 @@ function artpal_ipn_remember_result( $code, $fields, $detail = '' ) {
 }
 
 /**
- * Bodies to post back, in the order PayPal is most likely to VERIFIED.
+ * Bodies to post back to PayPal.
  *
- * The original bytes go first. A rebuilt body covers a raw stream that was
- * empty or already decoded. cmd is tried at the front and at the end.
+ * 1.4 sent cmd=_notify-validate first, then each posted field with urlencode
+ * (spaces as "+"). That rebuilt body goes first. The original bytes go next,
+ * because current PayPal answers VERIFIED only when the postback matches the
+ * notification it sent.
  *
  * @param string $raw    Original body.
  * @param array  $fields Decoded fields.
  * @return string[]
  */
 function artpal_ipn_validation_bodies( $raw, $fields ) {
-	$bodies = array();
-	$raw    = is_string( $raw ) ? $raw : '';
+	$bodies  = array();
+	$raw     = is_string( $raw ) ? $raw : '';
+	$encoded = artpal_ipn_encode_fields( $fields );
+	if ( $encoded !== '' ) {
+		$bodies[] = 'cmd=_notify-validate&' . $encoded;
+	}
 	if ( $raw !== '' && strpos( $raw, '=' ) !== false ) {
 		$bodies[] = 'cmd=_notify-validate&' . $raw;
 		$bodies[] = $raw . '&cmd=_notify-validate';
 	}
-	$encoded = artpal_ipn_encode_fields( $fields );
 	if ( $encoded !== '' ) {
-		$bodies[] = 'cmd=_notify-validate&' . $encoded;
 		$bodies[] = $encoded . '&cmd=_notify-validate';
 	}
 	return array_values( array_unique( $bodies ) );
@@ -1089,7 +1095,7 @@ function artpal_handle_paypal_ipn( $raw = null ) {
  *
  * @param array  $post Parsed IPN fields.
  * @param string $raw  Raw request body, when available.
- * @return string Result code: empty, transport_error, not_verified, not_completed, email_mismatch, missing_post, missing_txn, sold.
+ * @return string Result code: empty, transport_error, not_verified, email_mismatch, missing_post, not_sold, sold.
  */
 function artpal_process_paypal_ipn( $post, $raw = '' ) {
 	$post = is_array( $post ) ? $post : array();
@@ -1138,13 +1144,8 @@ function artpal_process_paypal_ipn( $post, $raw = '' ) {
 		return 'not_verified';
 	}
 
-	$status = isset( $fields['payment_status'] ) ? trim( (string) $fields['payment_status'] ) : '';
-	if ( strcasecmp( $status, 'Completed' ) !== 0 ) {
-		error_log( 'ArtPal IPN: payment_status is not Completed.' );
-		artpal_ipn_remember_result( 'not_completed', $fields, $status );
-		return 'not_completed';
-	}
-
+	// 1.4 marked the post sold on any VERIFIED notification whose receiver
+	// matched. It did not read payment_status or txn_id.
 	if ( ! artpal_ipn_email_matches( $fields ) ) {
 		error_log( 'ArtPal IPN: receiver_email and business do not match the PayPal email option.' );
 		artpal_ipn_remember_result( 'email_mismatch', $fields, '' );
@@ -1159,11 +1160,6 @@ function artpal_process_paypal_ipn( $post, $raw = '' ) {
 	}
 
 	$txn = isset( $fields['txn_id'] ) ? trim( (string) $fields['txn_id'] ) : '';
-	if ( $txn === '' ) {
-		error_log( 'ArtPal IPN: txn_id is missing.' );
-		artpal_ipn_remember_result( 'missing_txn', $fields, '' );
-		return 'missing_txn';
-	}
 
 	$marked = artpal_mark_sold(
 		(int) $item,
