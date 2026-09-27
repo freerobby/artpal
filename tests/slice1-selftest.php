@@ -264,7 +264,7 @@ $html = artpal_render_buy_now( 8358 );
 artpal_assert( strpos( $html, 'cmd' ) !== false && strpos( $html, '_xclick' ) !== false, 'available + price renders PayPal form' );
 artpal_assert( strpos( $html, 'SOLD!' ) === false, 'available + price is not sold HTML' );
 artpal_assert( strpos( $html, 'name="item_number" value="8358"' ) !== false, 'item number is the post ID' );
-artpal_assert( strpos( $html, 'name="notify_url" value="https://plugins.example/ipn.php"' ) !== false, 'notify_url follows the real plugin directory' );
+artpal_assert( strpos( $html, 'name="notify_url" value="https://plugins.example/ipn.php?artpal-ipn=1"' ) !== false, 'notify_url follows the real plugin directory' );
 artpal_assert( strpos( $html, '/wp-content/plugins/artpal/ipn.php' ) === false, 'checkout does not hardcode the artpal directory in notify_url' );
 artpal_assert( strpos( $html, '$150.00' ) !== false, 'prebuttontext fills _PRICE_' );
 artpal_assert( strpos( $html, '$15' ) !== false, 'prebuttontext fills _SHIPPING_' );
@@ -433,9 +433,10 @@ $ipn_post = array(
 	'mc_currency'    => 'USD',
 );
 $GLOBALS['artpal_test']['ipn_postback'] = 'INVALID';
+$GLOBALS['artpal_test']['ipn_requests'] = array();
 artpal_assert( artpal_process_paypal_ipn( $ipn_post, 'payment_status=Completed' ) === 'not_verified', 'INVALID IPN does not mark sold' );
 artpal_assert( ! artpal_is_sold( 50 ), 'post stays available after INVALID IPN' );
-artpal_assert( strpos( $GLOBALS['artpal_test']['ipn_request'], 'cmd=_notify-validate' ) === 0, 'IPN postback starts with cmd=_notify-validate' );
+artpal_assert( isset( $GLOBALS['artpal_test']['ipn_requests'][0] ) && strpos( $GLOBALS['artpal_test']['ipn_requests'][0], 'cmd=_notify-validate' ) === 0, 'IPN postback starts with cmd=_notify-validate' );
 
 $GLOBALS['artpal_test']['ipn_postback'] = "VERIFIED\n";
 $pending = $ipn_post;
@@ -445,8 +446,31 @@ artpal_assert( ! artpal_is_sold( 50 ), 'post stays available after Pending IPN' 
 
 $bad_email = $ipn_post;
 $bad_email['receiver_email'] = 'other@example.com';
+$bad_email['business'] = 'also-other@example.com';
 artpal_assert( artpal_process_paypal_ipn( $bad_email, 'raw' ) === 'email_mismatch', 'receiver_email must match the PayPal option' );
 artpal_assert( ! artpal_is_sold( 50 ), 'post stays available when receiver_email mismatches' );
+
+artpal_test_seed_post( 51, array( 5 ), '1', '1', 'Business email piece' );
+$business_email = $ipn_post;
+$business_email['item_number'] = '51';
+$business_email['txn_id'] = 'txn_business';
+$business_email['receiver_email'] = 'primary@paypal.example';
+$business_email['business'] = 'Seller@Example.com';
+artpal_assert( artpal_process_paypal_ipn( $business_email, 'payment_status=Completed&txn_id=txn_business&business=Seller%40Example.com&receiver_email=primary%40paypal.example&item_number=51' ) === 'sold', 'business email match marks sold when receiver_email is the account primary' );
+artpal_assert( artpal_is_sold( 51 ), 'business-email IPN post is sold' );
+
+artpal_test_seed_post( 52, array( 5, 12 ), '1', '1', 'Raw body piece' );
+artpal_assert(
+	artpal_process_paypal_ipn(
+		array(),
+		'payment_status=Completed&receiver_email=seller%40example.com&item_number=52&txn_id=txn_raw_only&payer_email=buyer%40example.com&mc_gross=1.00'
+	) === 'sold',
+	'IPN fields are read from the raw body when POST is empty'
+);
+artpal_assert( artpal_is_sold( 52 ), 'raw-body IPN post is sold' );
+$raw_last = get_option( 'artpal_ipn_last' );
+artpal_assert( is_array( $raw_last ) && $raw_last['result'] === 'sold' && $raw_last['item_number'] === '52' && $raw_last['txn_id'] === 'txn_raw_only', 'last IPN result is stored without requiring POST' );
+artpal_assert( ! isset( $raw_last['payer_email'] ), 'stored IPN result omits the buyer email' );
 
 $missing = $ipn_post;
 $missing['item_number'] = '99999';
@@ -471,13 +495,20 @@ $GLOBALS['artpal_test']['options']['ds_ap_usesandbox'] = '0';
 artpal_assert( get_paypal_domain() === 'www.paypal.com', 'live checkout still uses www.paypal.com' );
 
 $GLOBALS['artpal_test']['ipn_postback'] = 'INVALID';
+$GLOBALS['artpal_test']['ipn_requests'] = array();
 artpal_process_paypal_ipn(
 	array(
 		'payment_status' => 'Pending',
 	),
 	'payment_date=03%3A12%3A59+Jan+13%2C+2009+PST&payment_status=Pending'
 );
-artpal_assert( strpos( $GLOBALS['artpal_test']['ipn_request'], 'payment_date=03%3A12%3A59+Jan+13%2C+2009+PST' ) !== false, 'IPN postback keeps the original payment_date encoding' );
+$kept_date = false;
+foreach ( $GLOBALS['artpal_test']['ipn_requests'] as $ipn_try ) {
+	if ( strpos( $ipn_try, 'payment_date=03%3A12%3A59+Jan+13%2C+2009+PST' ) !== false ) {
+		$kept_date = true;
+	}
+}
+artpal_assert( $kept_date, 'IPN postback keeps the original payment_date encoding' );
 artpal_process_paypal_ipn(
 	array(
 		'item_name'      => 'Test post',
@@ -551,7 +582,7 @@ $GLOBALS['artpal_test']['options']['ds_ap_paypalbutton'] = $stale_button;
 $html = artpal_render_buy_now( 80 );
 artpal_assert( strpos( $html, 'src="' . $button_map['btn_buynow_LG.gif'] . '"' ) !== false, 'checkout uses the live button URL when the option is stale' );
 artpal_assert( strpos( $html, 'getflywheel.com' ) === false, 'checkout does not keep the stale button host' );
-artpal_assert( strpos( $plugin, 'Version: 2.0.2' ) !== false, 'plugin patch version is 2.0.2' );
+artpal_assert( strpos( $plugin, 'Version: 2.0.3' ) !== false, 'plugin patch version is 2.0.3' );
 
 if ( ! defined( 'ARTPAL_IPN_LIBRARY' ) ) {
 	define( 'ARTPAL_IPN_LIBRARY', true );
