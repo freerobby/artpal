@@ -47,6 +47,7 @@ function artpal_register_settings() {
 		'ds_ap_usesandbox'            => $flag,
 		'ds_ap_notify_email'          => $email,
 		'ds_ap_email_subject_prefix'  => $text,
+		'ds_ap_pdt_token'             => $text,
 	);
 
 	foreach ( $map as $key => $callback ) {
@@ -121,6 +122,10 @@ function artpal_register_settings() {
 		'key'   => 'ds_ap_usesandbox',
 		'label' => 'Use the PayPal sandbox. No live charges are processed.',
 	) );
+	add_settings_field( 'ds_ap_pdt_token', 'PDT identity token', 'artpal_field_text', 'artpal', 'artpal_paypal', array(
+		'key'         => 'ds_ap_pdt_token',
+		'description' => 'Optional. From PayPal Website preferences, Payment data transfer. Used when the thank-you page only receives a tx token.',
+	) );
 
 	add_settings_field( 'ds_ap_taxrate', 'Sales tax %', 'artpal_field_text', 'artpal', 'artpal_pricing', array(
 		'key'         => 'ds_ap_taxrate',
@@ -165,8 +170,9 @@ function artpal_section_categories() {
  * @return void
  */
 function artpal_section_paypal() {
-	echo '<p>Checkout is a PayPal Buy Now button. Instant Payment Notification URL:</p>';
+	echo '<p>Checkout is a PayPal Buy Now button. The buyer is sent back to the thank-you page with the payment details (<code>rm=2</code>). ArtPal verifies that return with PayPal and moves the post to Sold. PayPal may also call the notification URL:</p>';
 	echo '<p><code>' . esc_html( ipn_page_url() ) . '</code></p>';
+	echo '<p>If that URL never receives a POST from PayPal, turn on Payment Data Transfer in the PayPal account (Website payments, Website preferences) and paste the identity token below.</p>';
 }
 
 /**

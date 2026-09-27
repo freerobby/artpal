@@ -265,6 +265,7 @@ artpal_assert( strpos( $html, 'cmd' ) !== false && strpos( $html, '_xclick' ) !=
 artpal_assert( strpos( $html, 'SOLD!' ) === false, 'available + price is not sold HTML' );
 artpal_assert( strpos( $html, 'name="item_number" value="8358"' ) !== false, 'item number is the post ID' );
 artpal_assert( strpos( $html, 'name="notify_url" value="https://plugins.example/ipn.php?artpal-ipn=1"' ) !== false, 'notify_url follows the real plugin directory' );
+artpal_assert( strpos( $html, 'name="rm" value="2"' ) !== false, 'checkout asks PayPal to POST payment variables to the thank-you page' );
 artpal_assert( strpos( $html, '/wp-content/plugins/artpal/ipn.php' ) === false, 'checkout does not hardcode the artpal directory in notify_url' );
 artpal_assert( strpos( $html, '$150.00' ) !== false, 'prebuttontext fills _PRICE_' );
 artpal_assert( strpos( $html, '$15' ) !== false, 'prebuttontext fills _SHIPPING_' );
@@ -543,6 +544,7 @@ artpal_assert( $option_cap === 'manage_options', 'settings page capability is ma
 global $ds_ap_options_names;
 artpal_assert( in_array( 'ds_ap_notify_email', $ds_ap_options_names, true ), 'notify email option is registered for activation' );
 artpal_assert( in_array( 'ds_ap_email_subject_prefix', $ds_ap_options_names, true ), 'subject prefix option is registered for activation' );
+artpal_assert( in_array( 'ds_ap_pdt_token', $ds_ap_options_names, true ), 'PDT token option is registered for activation' );
 $GLOBALS['artpal_test']['options']['ds_ap_notify_email'] = 'keep@example.com';
 ds_ap_install();
 artpal_assert( get_option( 'ds_ap_notify_email' ) === 'keep@example.com', 'activation does not reset notify email' );
@@ -582,7 +584,51 @@ $GLOBALS['artpal_test']['options']['ds_ap_paypalbutton'] = $stale_button;
 $html = artpal_render_buy_now( 80 );
 artpal_assert( strpos( $html, 'src="' . $button_map['btn_buynow_LG.gif'] . '"' ) !== false, 'checkout uses the live button URL when the option is stale' );
 artpal_assert( strpos( $html, 'getflywheel.com' ) === false, 'checkout does not keep the stale button host' );
-artpal_assert( strpos( $plugin, 'Version: 2.0.3' ) !== false, 'plugin patch version is 2.0.3' );
+artpal_assert( strpos( $plugin, 'Version: 2.0.4' ) !== false, 'plugin patch version is 2.0.4' );
+
+artpal_test_reset();
+artpal_test_seed_post( 60, array( 5 ), '1', '1', 'Return piece' );
+$GLOBALS['artpal_test']['options']['ds_ap_thankyoupage'] = 'https://example.com/thank-you-for-your-purchase/';
+$GLOBALS['artpal_test']['ipn_postback'] = "VERIFIED\n";
+$return_fields = array(
+	'payment_status' => 'Completed',
+	'receiver_email' => 'seller@example.com',
+	'item_number'    => '60',
+	'txn_id'         => 'txn_return',
+	'payer_email'    => 'buyer@example.com',
+	'mc_gross'       => '1.00',
+);
+artpal_assert( artpal_handle_paypal_return_fields( $return_fields ) === 'sold', 'thank-you return marks sold after PayPal verifies it' );
+artpal_assert( artpal_is_sold( 60 ), 'thank-you return post is sold' );
+
+artpal_test_seed_post( 61, array( 5 ), '1', '1', 'PDT piece' );
+$GLOBALS['artpal_test']['options']['ds_ap_pdt_token'] = 'identity-token';
+$GLOBALS['artpal_test']['pdt_response'] = "SUCCESS\nitem_number=61\ntxn_id=txn_pdt\npayment_status=Completed\nreceiver_email=seller@example.com\npayer_email=buyer@example.com\nmc_gross=1.00\n";
+artpal_assert( artpal_handle_paypal_return_fields( array( 'tx' => 'pdt-token-value', 'item_number' => '61' ) ) === 'sold', 'PDT success marks sold from the synch response' );
+artpal_assert( artpal_is_sold( 61 ), 'PDT post is sold' );
+unset( $GLOBALS['artpal_test']['pdt_response'] );
+$GLOBALS['artpal_test']['options']['ds_ap_pdt_token'] = '';
+
+$_SERVER['REQUEST_URI'] = '/thank-you-for-your-purchase/';
+$_SERVER['SCRIPT_FILENAME'] = '/www/index.php';
+$_POST = array(
+	'payment_status' => 'Completed',
+	'business'       => 'seller@example.com',
+	'receiver_email' => 'primary@paypal.example',
+	'item_number'    => '62',
+	'txn_id'         => 'txn_init_return',
+);
+artpal_test_seed_post( 62, array( 5 ), '1', '1', 'Init return piece' );
+artpal_maybe_handle_paypal_return();
+artpal_assert( artpal_is_sold( 62 ), 'init handler marks sold on the thank-you POST' );
+$_SERVER['SCRIPT_FILENAME'] = '/www/wp-content/plugins/artpal-master/ipn.php';
+$_POST['item_number'] = '63';
+$_POST['txn_id'] = 'txn_should_not_run_on_ipn_script';
+artpal_test_seed_post( 63, array( 5 ), '1', '1', 'IPN script piece' );
+artpal_maybe_handle_paypal_return();
+artpal_assert( ! artpal_is_sold( 63 ), 'thank-you handler does not run during ipn.php' );
+$_POST = array();
+$_GET = array();
 
 if ( ! defined( 'ARTPAL_IPN_LIBRARY' ) ) {
 	define( 'ARTPAL_IPN_LIBRARY', true );
