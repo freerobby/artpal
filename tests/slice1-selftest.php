@@ -264,6 +264,8 @@ $html = artpal_render_buy_now( 8358 );
 artpal_assert( strpos( $html, 'cmd' ) !== false && strpos( $html, '_xclick' ) !== false, 'available + price renders PayPal form' );
 artpal_assert( strpos( $html, 'SOLD!' ) === false, 'available + price is not sold HTML' );
 artpal_assert( strpos( $html, 'name="item_number" value="8358"' ) !== false, 'item number is the post ID' );
+artpal_assert( strpos( $html, 'name="notify_url" value="https://plugins.example/ipn.php"' ) !== false, 'notify_url follows the real plugin directory' );
+artpal_assert( strpos( $html, '/wp-content/plugins/artpal/ipn.php' ) === false, 'checkout does not hardcode the artpal directory in notify_url' );
 artpal_assert( strpos( $html, '$150.00' ) !== false, 'prebuttontext fills _PRICE_' );
 artpal_assert( strpos( $html, '$15' ) !== false, 'prebuttontext fills _SHIPPING_' );
 
@@ -461,9 +463,29 @@ artpal_assert( count( $GLOBALS['artpal_test']['mail'] ) === 1, 'IPN sends one em
 artpal_assert( artpal_process_paypal_ipn( $ipn_post, 'replay' ) === 'sold', 'replayed IPN stays sold' );
 artpal_assert( count( $GLOBALS['artpal_test']['mail'] ) === 1, 'replayed IPN does not email again' );
 
-artpal_assert( artpal_paypal_webscr_url() === 'https://www.paypal.com/cgi-bin/webscr', 'live IPN verify URL is HTTPS' );
+artpal_assert( artpal_paypal_webscr_url() === 'https://ipnpb.paypal.com/cgi-bin/webscr', 'live IPN verify URL is the ipnpb host' );
 $GLOBALS['artpal_test']['options']['ds_ap_usesandbox'] = '1';
-artpal_assert( artpal_paypal_webscr_url() === 'https://www.sandbox.paypal.com/cgi-bin/webscr', 'sandbox IPN verify URL is HTTPS' );
+artpal_assert( artpal_paypal_webscr_url() === 'https://ipnpb.sandbox.paypal.com/cgi-bin/webscr', 'sandbox IPN verify URL is the ipnpb host' );
+artpal_assert( get_paypal_domain() === 'www.sandbox.paypal.com', 'sandbox checkout still uses www.sandbox.paypal.com' );
+$GLOBALS['artpal_test']['options']['ds_ap_usesandbox'] = '0';
+artpal_assert( get_paypal_domain() === 'www.paypal.com', 'live checkout still uses www.paypal.com' );
+
+$GLOBALS['artpal_test']['ipn_postback'] = 'INVALID';
+artpal_process_paypal_ipn(
+	array(
+		'payment_status' => 'Pending',
+	),
+	'payment_date=03%3A12%3A59+Jan+13%2C+2009+PST&payment_status=Pending'
+);
+artpal_assert( strpos( $GLOBALS['artpal_test']['ipn_request'], 'payment_date=03%3A12%3A59+Jan+13%2C+2009+PST' ) !== false, 'IPN postback keeps the original payment_date encoding' );
+artpal_process_paypal_ipn(
+	array(
+		'item_name'      => 'Test post',
+		'payment_status' => 'Pending',
+	),
+	''
+);
+artpal_assert( strpos( $GLOBALS['artpal_test']['ipn_request'], 'item_name=Test+post' ) !== false, 'IPN fallback encodes spaces as plus signs' );
 
 // Registration and source guards
 artpal_register_shortcodes();
@@ -501,6 +523,12 @@ artpal_assert( strpos( $plugin, 'JamieWG' ) === false && strpos( $plugin, 'Hudso
 artpal_assert( strpos( $plugin, 'edit_plugins' ) === false, 'edit_plugins capability is gone' );
 artpal_assert( strpos( $plugin, 'fsockopen' ) === false && strpos( $ipn, 'fsockopen' ) === false, 'no fsockopen' );
 artpal_assert( strpos( $ipn, 'wp-load.php' ) !== false && strpos( $ipn, 'wp-blog-header.php' ) === false, 'ipn.php boots through wp-load.php' );
+artpal_assert( strpos( $ipn, '/../../../wp-load.php' ) === false, 'ipn.php does not probe wp-load.php through a dot-dot path' );
+artpal_assert( strpos( $ipn, '.wordpress/wp-load.php' ) !== false, 'ipn.php looks for Flywheel .wordpress/wp-load.php' );
+$raw_pos  = strpos( $ipn, "file_get_contents( 'php://input' )" );
+$load_pos = strpos( $ipn, 'require $artpal_wp_load' );
+artpal_assert( $raw_pos !== false && $load_pos !== false && $raw_pos < $load_pos, 'ipn.php reads the body before loading WordPress' );
+artpal_assert( strpos( $plugin, "get_option( 'siteurl' ) . '/wp-content/plugins/artpal/ipn.php'" ) === false, 'notify URL is not hardcoded to the artpal directory' );
 artpal_assert( stripos( $plugin, 'stripe' ) === false && stripos( $ipn, 'stripe' ) === false && stripos( $opts, 'stripe' ) === false, 'no Stripe code' );
 artpal_assert( strpos( $plugin, 'admin-functions.php' ) === false, 'admin-functions.php require is gone' );
 artpal_assert( strpos( $opts, 'settings_errors' ) === false, 'settings screen does not print a second saved notice' );
@@ -523,7 +551,41 @@ $GLOBALS['artpal_test']['options']['ds_ap_paypalbutton'] = $stale_button;
 $html = artpal_render_buy_now( 80 );
 artpal_assert( strpos( $html, 'src="' . $button_map['btn_buynow_LG.gif'] . '"' ) !== false, 'checkout uses the live button URL when the option is stale' );
 artpal_assert( strpos( $html, 'getflywheel.com' ) === false, 'checkout does not keep the stale button host' );
-artpal_assert( strpos( $plugin, 'Version: 2.0.1' ) !== false, 'plugin patch version is 2.0.1' );
+artpal_assert( strpos( $plugin, 'Version: 2.0.2' ) !== false, 'plugin patch version is 2.0.2' );
+
+if ( ! defined( 'ARTPAL_IPN_LIBRARY' ) ) {
+	define( 'ARTPAL_IPN_LIBRARY', true );
+}
+require dirname( __DIR__ ) . '/ipn.php';
+
+/**
+ * @param string $path File to create, including parents.
+ * @return void
+ */
+function artpal_test_touch( $path ) {
+	$dir = dirname( $path );
+	if ( ! is_dir( $dir ) ) {
+		mkdir( $dir, 0777, true );
+	}
+	file_put_contents( $path, "<?php\n" );
+}
+
+$artpal_ipn_root = sys_get_temp_dir() . '/artpal-ipn-' . getmypid();
+$fly_plugin      = $artpal_ipn_root . '/fly/wp-content/plugins/artpal-master';
+mkdir( $fly_plugin, 0777, true );
+artpal_test_touch( $fly_plugin . '/wp-load.php' );
+artpal_test_touch( $artpal_ipn_root . '/fly/.wordpress/wp-load.php' );
+artpal_assert( artpal_find_wp_load( $fly_plugin ) === $artpal_ipn_root . '/fly/.wordpress/wp-load.php', 'Flywheel IPN bootstrap uses .wordpress/wp-load.php' );
+
+$std_plugin = $artpal_ipn_root . '/std/wp-content/plugins/artpal';
+mkdir( $std_plugin, 0777, true );
+artpal_test_touch( $artpal_ipn_root . '/std/wp-load.php' );
+artpal_assert( artpal_find_wp_load( $std_plugin ) === $artpal_ipn_root . '/std/wp-load.php', 'standard IPN bootstrap uses the web root wp-load.php' );
+
+$sub_plugin = $artpal_ipn_root . '/sub/wp-content/plugins/artpal';
+mkdir( $sub_plugin, 0777, true );
+artpal_test_touch( $artpal_ipn_root . '/sub/wp/wp-load.php' );
+artpal_assert( artpal_find_wp_load( $sub_plugin ) === $artpal_ipn_root . '/sub/wp/wp-load.php', 'subdirectory IPN bootstrap uses wp/wp-load.php' );
 
 echo "\n";
 if ( $failed ) {

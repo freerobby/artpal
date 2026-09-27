@@ -4,7 +4,7 @@ Donate link: http://freerobby.com/donate
 Tags: paypal, ecommerce, artists, sell
 Requires at least: 6.0
 Tested up to: 6.8
-Stable tag: 2.0.1
+Stable tag: 2.0.2
 
 ArtPal is a free (GPL) Wordpress plugin, originally written for Artists, to seemlessly integrate PayPal with their Wordpress blogs so that they can sell their work online.
 == Description ==
@@ -26,6 +26,11 @@ ArtPal's most important features are:
 3. Configure as specified at [http://freerobby.com/artpal](http://freerobby.com/artpal).
 
 == Changelog ==
+
+= 2.0.2 =
+* PayPal notify_url follows the plugin directory. A button was posting IPN to /wp-content/plugins/artpal/ipn.php, which 404s when the folder has another name. The buyer still landed on the thank-you page, and the post stayed Available.
+* ipn.php finds wp-load.php when WordPress core is outside the web root, including Flywheel's .wordpress directory. The old relative path stopped with "WordPress bootstrap not found." before the category could change.
+* IPN verification posts to ipnpb.paypal.com (or the sandbox ipnpb host). The original request body is captured before WordPress loads, and a rebuilt body encodes spaces as "+".
 
 = 2.0.1 =
 * Settings → ArtPal shows one "Settings saved" notice. WordPress already prints that notice on screens under Settings, and the plugin was printing it again. The second print did not write options a second time.

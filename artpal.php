@@ -4,7 +4,7 @@ Plugin Name: ArtPal
 Plugin URI: http://freerobby.com/artpal
 Description: ArtPal allows artists to use WordPress to sell one-of-a-kind originals. When a piece sells, ArtPal stops showing a buy button, shows the sold HTML, and moves the post from the Available category to the Sold category.
 Author: Robby Grossman
-Version: 2.0.1
+Version: 2.0.2
 Requires at least: 6.0
 Requires PHP: 7.4
 Author URI: http://freerobby.com
@@ -126,7 +126,7 @@ function get_paypal_domain() {
 }
 
 function ipn_page_url() {
-	return get_option( 'siteurl' ) . '/wp-content/plugins/artpal/ipn.php';
+	return plugins_url( 'ipn.php', __FILE__ );
 }
 
 // Define our configuration pages
@@ -650,7 +650,7 @@ function ds_ap_generatepaypalbutton( $selleremail, $itemname, $itemnumber, $pric
 		. '<input type="hidden" name="currency_code" value="' . get_option( 'ds_ap_currencycode4217' ) . '">' // us dollars only
 		. '<input type="hidden" name="quantity" value="1">' // default 1 item
 		. '<input type="hidden" name="shipping" value="' . $shipping . '">' // shipping price of item
-		. '<input type="hidden" name="notify_url" value="' . ipn_page_url() . '">'
+		. '<input type="hidden" name="notify_url" value="' . esc_url( ipn_page_url() ) . '">'
 		. '<input type="hidden" name="return" value="' . get_option( 'ds_ap_thankyoupage' ) . '">'
 		. '<input type="hidden" name="cancel_return" value="' . get_option( 'ds_ap_cancelpage' ) . '">'
 		. '<input type="image" name="add" src="' . esc_url( artpal_paypal_button_url() ) . '">' // button graphic
@@ -847,12 +847,18 @@ function artpal_save_metabox( $post_id ) {
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
- * PayPal webscr endpoint. Sandbox when ds_ap_usesandbox is on.
+ * PayPal IPN verification endpoint. Sandbox when ds_ap_usesandbox is on.
+ *
+ * Checkout buttons still post to www.paypal.com. Verification has to go to
+ * the ipnpb host from PayPal's IPN listener protocol.
  *
  * @return string
  */
 function artpal_paypal_webscr_url() {
-	return 'https://' . get_paypal_domain() . '/cgi-bin/webscr';
+	if ( get_option( 'ds_ap_usesandbox' ) == true ) {
+		return 'https://ipnpb.sandbox.paypal.com/cgi-bin/webscr';
+	}
+	return 'https://ipnpb.paypal.com/cgi-bin/webscr';
 }
 
 /**
@@ -897,12 +903,21 @@ function artpal_paypal_ipn_postback( $request_body ) {
 /**
  * Entry from ipn.php. Uses the raw body for verification and $_POST for field checks.
  *
+ * ipn.php reads php://input before WordPress boots and passes that string in.
+ * Reading it again here would see an empty stream.
+ *
+ * @param string|null $raw Original request body, when the front controller already read it.
  * @return void
  */
-function artpal_handle_paypal_ipn() {
-	$raw  = file_get_contents( 'php://input' );
+function artpal_handle_paypal_ipn( $raw = null ) {
+	if ( ! is_string( $raw ) ) {
+		$raw = file_get_contents( 'php://input' );
+	}
+	if ( ! is_string( $raw ) ) {
+		$raw = '';
+	}
 	$post = ( isset( $_POST ) && is_array( $_POST ) ) ? wp_unslash( $_POST ) : array();
-	$result = artpal_process_paypal_ipn( $post, is_string( $raw ) ? $raw : '' );
+	$result = artpal_process_paypal_ipn( $post, $raw );
 	if ( 'transport_error' === $result ) {
 		status_header( 500 );
 		return;
@@ -933,7 +948,9 @@ function artpal_process_paypal_ipn( $post, $raw = '' ) {
 			if ( is_array( $value ) ) {
 				continue;
 			}
-			$validate .= '&' . rawurlencode( (string) $key ) . '=' . rawurlencode( (string) $value );
+			// application/x-www-form-urlencoded uses "+" for spaces. rawurlencode()
+			// would turn those into "%20" and PayPal would answer INVALID.
+			$validate .= '&' . urlencode( (string) $key ) . '=' . urlencode( (string) $value );
 		}
 	}
 
