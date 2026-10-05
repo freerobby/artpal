@@ -264,8 +264,9 @@ $html = artpal_render_buy_now( 8358 );
 artpal_assert( strpos( $html, 'cmd' ) !== false && strpos( $html, '_xclick' ) !== false, 'available + price renders PayPal form' );
 artpal_assert( strpos( $html, 'SOLD!' ) === false, 'available + price is not sold HTML' );
 artpal_assert( strpos( $html, 'name="item_number" value="8358"' ) !== false, 'item number is the post ID' );
-artpal_assert( strpos( $html, 'name="notify_url" value="https://plugins.example/ipn.php?artpal-ipn=1"' ) !== false, 'notify_url follows the real plugin directory' );
-artpal_assert( strpos( $html, 'name="rm" value="2"' ) !== false, 'checkout asks PayPal to POST payment variables to the thank-you page' );
+artpal_assert( strpos( $html, 'name="notify_url" value="https://plugins.example/ipn.php"' ) !== false, 'notify_url follows the real plugin directory' );
+artpal_assert( strpos( $html, 'name="rm"' ) === false, 'checkout does not ask PayPal to POST to the thank-you page' );
+artpal_assert( strpos( $html, 'name="return" value="https://example.com/thanks"' ) !== false, 'thank-you page is still the buyer return URL' );
 artpal_assert( strpos( $html, '/wp-content/plugins/artpal/ipn.php' ) === false, 'checkout does not hardcode the artpal directory in notify_url' );
 artpal_assert( strpos( $html, '$150.00' ) !== false, 'prebuttontext fills _PRICE_' );
 artpal_assert( strpos( $html, '$15' ) !== false, 'prebuttontext fills _SHIPPING_' );
@@ -421,8 +422,12 @@ artpal_render_metabox( $sold_post );
 $box = ob_get_clean();
 artpal_assert( strpos( $box, 'Sold' ) !== false && strpos( $box, 'paypal' ) !== false && strpos( $box, 'txn_43' ) !== false, 'sold metabox shows processor and event id' );
 
-// IPN: only VERIFIED + Completed + matching receiver + real post ID marks sold
+// IPN: VERIFIED + matching receiver + real post ID marks sold, as in 1.4.
 artpal_test_reset();
+$_SERVER['REQUEST_METHOD']  = 'POST';
+$_SERVER['REMOTE_ADDR']     = '173.0.81.1';
+$_SERVER['HTTP_USER_AGENT'] = 'PayPal IPN ( https://www.paypal.com/ipn )';
+$_SERVER['CONTENT_LENGTH']  = '0';
 artpal_test_seed_post( 50, array( 5, 12, 20 ), '150', '15', 'IPN piece' );
 $ipn_post = array(
 	'payment_status' => 'Completed',
@@ -437,13 +442,25 @@ $GLOBALS['artpal_test']['ipn_postback'] = 'INVALID';
 $GLOBALS['artpal_test']['ipn_requests'] = array();
 artpal_assert( artpal_process_paypal_ipn( $ipn_post, 'payment_status=Completed' ) === 'not_verified', 'INVALID IPN does not mark sold' );
 artpal_assert( ! artpal_is_sold( 50 ), 'post stays available after INVALID IPN' );
-artpal_assert( isset( $GLOBALS['artpal_test']['ipn_requests'][0] ) && strpos( $GLOBALS['artpal_test']['ipn_requests'][0], 'cmd=_notify-validate' ) === 0, 'IPN postback starts with cmd=_notify-validate' );
+artpal_assert( isset( $GLOBALS['artpal_test']['ipn_requests'][0] ) && $GLOBALS['artpal_test']['ipn_requests'][0] === 'cmd=_notify-validate&payment_status=Completed', 'first IPN postback is cmd plus the original bytes' );
+artpal_assert( count( $GLOBALS['artpal_test']['ipn_requests'] ) === 2, 'INVALID is retried once with the rebuilt body, then given up' );
 
 $GLOBALS['artpal_test']['ipn_postback'] = "VERIFIED\n";
-$pending = $ipn_post;
-$pending['payment_status'] = 'Pending';
-artpal_assert( artpal_process_paypal_ipn( $pending, 'raw' ) === 'not_completed', 'Pending IPN does not mark sold' );
-artpal_assert( ! artpal_is_sold( 50 ), 'post stays available after Pending IPN' );
+artpal_test_seed_post( 53, array( 5 ), '1', '1', 'Pending piece' );
+$pending = array(
+	'payment_status' => 'Pending',
+	'receiver_email' => 'seller@example.com',
+	'item_number'    => '53',
+	'txn_id'         => 'txn_pending',
+);
+artpal_assert( artpal_process_paypal_ipn( $pending, 'payment_status=Pending&receiver_email=seller%40example.com&item_number=53&txn_id=txn_pending' ) === 'sold', 'Pending VERIFIED IPN marks sold, as 1.4 did' );
+artpal_assert( artpal_is_sold( 53 ), 'Pending IPN post is sold' );
+artpal_assert( ! artpal_is_sold( 50 ), 'Pending IPN does not touch a different post' );
+
+artpal_test_seed_post( 54, array( 5, 12 ), '1', '1', 'Classic piece' );
+artpal_assert( artpal_process_paypal_ipn( array( 'receiver_email' => 'Seller@Example.com', 'item_number' => '54' ), '' ) === 'sold', 'VERIFIED IPN marks sold without payment_status or txn_id' );
+$classic_cats = artpal_get_category_ids( 54 );
+artpal_assert( in_array( 3, $classic_cats, true ) && ! in_array( 5, $classic_cats, true ) && in_array( 12, $classic_cats, true ), 'classic IPN removes Available, appends Sold, keeps other categories' );
 
 $bad_email = $ipn_post;
 $bad_email['receiver_email'] = 'other@example.com';
@@ -472,6 +489,27 @@ artpal_assert( artpal_is_sold( 52 ), 'raw-body IPN post is sold' );
 $raw_last = get_option( 'artpal_ipn_last' );
 artpal_assert( is_array( $raw_last ) && $raw_last['result'] === 'sold' && $raw_last['item_number'] === '52' && $raw_last['txn_id'] === 'txn_raw_only', 'last IPN result is stored without requiring POST' );
 artpal_assert( ! isset( $raw_last['payer_email'] ), 'stored IPN result omits the buyer email' );
+artpal_assert( is_array( $raw_last['keys'] ) && in_array( 'receiver_email', $raw_last['keys'], true ) && in_array( 'payer_email', $raw_last['keys'], true ), 'stored IPN result lists the field names that arrived' );
+
+// Request log: every call to the handler is kept, newest first, with request details.
+$_SERVER['CONTENT_LENGTH'] = '0';
+$_POST = array();
+artpal_handle_paypal_ipn( '' );
+$ipn_log = get_option( 'artpal_ipn_log' );
+artpal_assert( is_array( $ipn_log ) && $ipn_log[0]['result'] === 'empty', 'a request with no fields is logged as empty' );
+artpal_assert( $ipn_log[0]['method'] === 'POST' && $ipn_log[0]['remote_addr'] === '173.0.81.1' && strpos( $ipn_log[0]['user_agent'], 'PayPal IPN' ) === 0, 'log entry records method, caller address, and user agent' );
+artpal_assert( $ipn_log[1]['result'] === 'sold' && $ipn_log[1]['item_number'] === '52', 'log keeps earlier results, newest first' );
+$_SERVER['CONTENT_LENGTH'] = '77';
+artpal_test_seed_post( 55, array( 5 ), '1', '1', 'Handler piece' );
+$handler_raw = 'receiver_email=seller%40example.com&item_number=55&txn_id=txn_handler&payer_email=b%40example.com';
+artpal_handle_paypal_ipn( $handler_raw );
+$ipn_log = get_option( 'artpal_ipn_log' );
+artpal_assert( $ipn_log[0]['result'] === 'sold' && $ipn_log[0]['raw_bytes'] === strlen( $handler_raw ) && $ipn_log[0]['content_length'] === 77, 'handler logs body size and content length with the result' );
+artpal_assert( artpal_is_sold( 55 ), 'handler marks sold from the raw body alone' );
+for ( $i = 0; $i < 30; $i++ ) {
+	artpal_handle_paypal_ipn( '' );
+}
+artpal_assert( count( get_option( 'artpal_ipn_log' ) ) === 25, 'log is capped at 25 entries' );
 
 $missing = $ipn_post;
 $missing['item_number'] = '99999';
@@ -544,7 +582,7 @@ artpal_assert( $option_cap === 'manage_options', 'settings page capability is ma
 global $ds_ap_options_names;
 artpal_assert( in_array( 'ds_ap_notify_email', $ds_ap_options_names, true ), 'notify email option is registered for activation' );
 artpal_assert( in_array( 'ds_ap_email_subject_prefix', $ds_ap_options_names, true ), 'subject prefix option is registered for activation' );
-artpal_assert( in_array( 'ds_ap_pdt_token', $ds_ap_options_names, true ), 'PDT token option is registered for activation' );
+artpal_assert( ! in_array( 'ds_ap_pdt_token', $ds_ap_options_names, true ), 'PDT token option is gone' );
 $GLOBALS['artpal_test']['options']['ds_ap_notify_email'] = 'keep@example.com';
 ds_ap_install();
 artpal_assert( get_option( 'ds_ap_notify_email' ) === 'keep@example.com', 'activation does not reset notify email' );
@@ -584,49 +622,12 @@ $GLOBALS['artpal_test']['options']['ds_ap_paypalbutton'] = $stale_button;
 $html = artpal_render_buy_now( 80 );
 artpal_assert( strpos( $html, 'src="' . $button_map['btn_buynow_LG.gif'] . '"' ) !== false, 'checkout uses the live button URL when the option is stale' );
 artpal_assert( strpos( $html, 'getflywheel.com' ) === false, 'checkout does not keep the stale button host' );
-artpal_assert( strpos( $plugin, 'Version: 2.0.4' ) !== false, 'plugin patch version is 2.0.4' );
-
-artpal_test_reset();
-artpal_test_seed_post( 60, array( 5 ), '1', '1', 'Return piece' );
-$GLOBALS['artpal_test']['options']['ds_ap_thankyoupage'] = 'https://example.com/thank-you-for-your-purchase/';
-$GLOBALS['artpal_test']['ipn_postback'] = "VERIFIED\n";
-$return_fields = array(
-	'payment_status' => 'Completed',
-	'receiver_email' => 'seller@example.com',
-	'item_number'    => '60',
-	'txn_id'         => 'txn_return',
-	'payer_email'    => 'buyer@example.com',
-	'mc_gross'       => '1.00',
-);
-artpal_assert( artpal_handle_paypal_return_fields( $return_fields ) === 'sold', 'thank-you return marks sold after PayPal verifies it' );
-artpal_assert( artpal_is_sold( 60 ), 'thank-you return post is sold' );
-
-artpal_test_seed_post( 61, array( 5 ), '1', '1', 'PDT piece' );
-$GLOBALS['artpal_test']['options']['ds_ap_pdt_token'] = 'identity-token';
-$GLOBALS['artpal_test']['pdt_response'] = "SUCCESS\nitem_number=61\ntxn_id=txn_pdt\npayment_status=Completed\nreceiver_email=seller@example.com\npayer_email=buyer@example.com\nmc_gross=1.00\n";
-artpal_assert( artpal_handle_paypal_return_fields( array( 'tx' => 'pdt-token-value', 'item_number' => '61' ) ) === 'sold', 'PDT success marks sold from the synch response' );
-artpal_assert( artpal_is_sold( 61 ), 'PDT post is sold' );
-unset( $GLOBALS['artpal_test']['pdt_response'] );
-$GLOBALS['artpal_test']['options']['ds_ap_pdt_token'] = '';
-
-$_SERVER['REQUEST_URI'] = '/thank-you-for-your-purchase/';
-$_SERVER['SCRIPT_FILENAME'] = '/www/index.php';
-$_POST = array(
-	'payment_status' => 'Completed',
-	'business'       => 'seller@example.com',
-	'receiver_email' => 'primary@paypal.example',
-	'item_number'    => '62',
-	'txn_id'         => 'txn_init_return',
-);
-artpal_test_seed_post( 62, array( 5 ), '1', '1', 'Init return piece' );
-artpal_maybe_handle_paypal_return();
-artpal_assert( artpal_is_sold( 62 ), 'init handler marks sold on the thank-you POST' );
-$_SERVER['SCRIPT_FILENAME'] = '/www/wp-content/plugins/artpal-master/ipn.php';
-$_POST['item_number'] = '63';
-$_POST['txn_id'] = 'txn_should_not_run_on_ipn_script';
-artpal_test_seed_post( 63, array( 5 ), '1', '1', 'IPN script piece' );
-artpal_maybe_handle_paypal_return();
-artpal_assert( ! artpal_is_sold( 63 ), 'thank-you handler does not run during ipn.php' );
+artpal_assert( strpos( $plugin, 'Version: 2.1.0' ) !== false, 'plugin version is 2.1.0' );
+artpal_assert( ! function_exists( 'artpal_maybe_handle_paypal_return' ) && ! function_exists( 'artpal_paypal_pdt_fetch' ), 'thank-you return and PDT handlers are gone' );
+artpal_assert( strpos( $plugin, "strcasecmp( \$status, 'Completed' )" ) === false, 'IPN does not require payment_status Completed' );
+artpal_assert( strpos( $plugin, 'curl_init' ) === false, 'verification uses the WordPress HTTP API, not curl' );
+artpal_assert( strpos( $ipn, 'artpal_ipn_log' ) !== false && strpos( $ipn, 'notify_url' ) !== false, 'diagnostic shows the request log and the notify_url' );
+artpal_assert( strpos( $opts, 'pdt_token' ) === false && strpos( $opts, 'rm=2' ) === false, 'settings screen no longer mentions PDT or rm=2' );
 $_POST = array();
 $_GET = array();
 
