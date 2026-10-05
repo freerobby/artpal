@@ -166,7 +166,7 @@ function artpal_section_categories() {
 function artpal_section_paypal() {
 	echo '<p>Checkout is a PayPal Buy Now button. When a payment completes, PayPal posts an Instant Payment Notification to this URL. ArtPal confirms the notification with PayPal and moves the post to Sold. The buyer does not have to return to the thank-you page.</p>';
 	echo '<p><code>' . esc_html( ipn_page_url() ) . '</code></p>';
-	echo '<p>In the PayPal account that receives payments, set Account Settings &rarr; Notifications &rarr; Instant payment notifications &rarr; Notification URL to exactly that address. PayPal follows a redirect to a different host, such as one with or without <code>www.</code>, but drops the payment data on the way, so the post stays Available and nothing is logged here.</p>';
+	echo '<p>In the PayPal account that receives payments, set Account Settings &rarr; Notifications &rarr; Instant payment notifications &rarr; Notification URL to exactly that address.</p>';
 	echo '<p>Recent requests to that URL and their results: <code>' . esc_html( ipn_page_url() . '?artpal_diag=1' ) . '</code></p>';
 }
 
