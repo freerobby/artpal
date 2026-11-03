@@ -229,6 +229,89 @@ if ( ! function_exists( 'get_post' ) ) {
 	function esc_url_raw( $url ) {
 		return (string) $url;
 	}
+	function delete_option( $key ) {
+		unset( $GLOBALS['artpal_test']['options'][ $key ] );
+		return true;
+	}
+	function check_admin_referer( $action = -1, $query_arg = '_wpnonce' ) {
+		unset( $action, $query_arg );
+		if ( empty( $GLOBALS['artpal_test']['nonce_ok'] ) ) {
+			throw new Exception( 'bad nonce' );
+		}
+		return 1;
+	}
+	function wp_die( $message = '', $title = '', $args = array() ) {
+		unset( $title, $args );
+		throw new Exception( 'wp_die: ' . $message );
+	}
+	function selected( $selected, $current = true, $echo = true ) {
+		$result = ( (string) $selected === (string) $current ) ? " selected='selected'" : '';
+		if ( $echo ) {
+			echo $result;
+		}
+		return $result;
+	}
+	function checked( $checked, $current = true, $echo = true ) {
+		$result = ( $checked == $current ) ? " checked='checked'" : '';
+		if ( $echo ) {
+			echo $result;
+		}
+		return $result;
+	}
+	function get_posts( $args = array() ) {
+		if ( ! is_array( $args ) ) {
+			$args = array();
+		}
+		$statuses  = isset( $args['post_status'] ) ? (array) $args['post_status'] : array( 'publish' );
+		$tax_query = ( isset( $args['tax_query'] ) && is_array( $args['tax_query'] ) ) ? $args['tax_query'] : array();
+		$ids       = array();
+		foreach ( $GLOBALS['artpal_test']['posts'] as $id => $post ) {
+			$status = isset( $post['post_status'] ) ? $post['post_status'] : 'publish';
+			if ( ! in_array( 'any', $statuses, true ) && ! in_array( $status, $statuses, true ) ) {
+				continue;
+			}
+			$terms = isset( $GLOBALS['artpal_test']['terms'][ (int) $id ] ) ? array_map( 'intval', $GLOBALS['artpal_test']['terms'][ (int) $id ] ) : array();
+			if ( ! artpal_test_tax_matches( $terms, $tax_query ) ) {
+				continue;
+			}
+			$ids[] = (int) $id;
+		}
+		sort( $ids );
+		if ( isset( $args['fields'] ) && $args['fields'] === 'ids' ) {
+			return $ids;
+		}
+		$out = array();
+		foreach ( $ids as $id ) {
+			$out[] = (object) $GLOBALS['artpal_test']['posts'][ $id ];
+		}
+		return $out;
+	}
+}
+
+/**
+ * @param int[] $terms     Assigned category ids.
+ * @param array $tax_query get_posts tax_query.
+ * @return bool
+ */
+function artpal_test_tax_matches( $terms, $tax_query ) {
+	$relation = isset( $tax_query['relation'] ) ? strtoupper( (string) $tax_query['relation'] ) : 'AND';
+	$clauses  = array();
+	foreach ( $tax_query as $key => $clause ) {
+		if ( ! is_int( $key ) || ! is_array( $clause ) ) {
+			continue;
+		}
+		$wanted = isset( $clause['terms'] ) ? array_map( 'intval', (array) $clause['terms'] ) : array();
+		$op     = isset( $clause['operator'] ) ? strtoupper( (string) $clause['operator'] ) : 'IN';
+		$has    = count( array_intersect( array_map( 'intval', $terms ), $wanted ) ) > 0;
+		$clauses[] = ( 'NOT IN' === $op ) ? ! $has : $has;
+	}
+	if ( empty( $clauses ) ) {
+		return true;
+	}
+	if ( 'OR' === $relation ) {
+		return in_array( true, $clauses, true );
+	}
+	return ! in_array( false, $clauses, true );
 }
 
 function artpal_test_seed_post( $id, $cats, $price = null, $shipping = null, $title = 'Splash!' ) {
@@ -557,6 +640,320 @@ artpal_process_paypal_ipn(
 );
 artpal_assert( strpos( $GLOBALS['artpal_test']['ipn_request'], 'item_name=Test+post' ) !== false, 'IPN fallback encodes spaces as plus signs' );
 
+/**
+ * @param array $rows List of array( min, max, amount, mode, round ).
+ * @return array
+ */
+function artpal_test_tier_rules( $rows ) {
+	$raw = array();
+	foreach ( $rows as $row ) {
+		$raw[] = array(
+			'min'    => $row[0],
+			'max'    => $row[1],
+			'amount' => $row[2],
+			'mode'   => $row[3],
+			'round'  => $row[4],
+		);
+	}
+	return artpal_pricing_parse_rules( $raw );
+}
+
+// Bulk price increase: tiers, rounding, unsold only, preview fingerprint, undo.
+artpal_test_reset();
+artpal_assert( artpal_pricing_format_money( 1200 ) === '$1,200.00', 'money format uses the currency symbol and thousands separator' );
+artpal_assert( artpal_pricing_format_diff( 15 ) === '+$15.00', 'a positive difference is marked' );
+artpal_assert( artpal_pricing_format_percent( 10, 15 ) === '50.0%', 'percent increase is one decimal' );
+artpal_assert( artpal_pricing_format_percent( 1000, 1200 ) === '20.0%', 'percent increase on $1,000 is exact' );
+artpal_assert( artpal_pricing_format_percent( 0, 10 ) === '', 'percent increase has no baseline at zero' );
+
+$round_up = artpal_test_tier_rules(
+	array(
+		array( '0', '', '30', 'percent', '5' ),
+	)
+);
+artpal_assert( empty( $round_up['errors'] ), 'a single tier parses' );
+artpal_assert( number_format( artpal_pricing_adjust( 10, $round_up['rules'][0] ), 2, '.', '' ) === '15.00', '$10 +30% rounds up to $15' );
+
+$mid = artpal_test_tier_rules( array( array( '0', '', '20', 'percent', '5' ) ) );
+artpal_assert( number_format( artpal_pricing_adjust( 95, $mid['rules'][0] ), 2, '.', '' ) === '115.00', '$95 +20% rounds up to $115' );
+
+$high = artpal_test_tier_rules( array( array( '0', '', '20', 'percent', '100' ) ) );
+artpal_assert( number_format( artpal_pricing_adjust( 1000, $high['rules'][0] ), 2, '.', '' ) === '1200.00', '$1,000 +20% rounded to $100 stays $1,200' );
+
+$top = artpal_test_tier_rules( array( array( '0', '', '100', 'flat', '250' ) ) );
+artpal_assert( number_format( artpal_pricing_adjust( 2450, $top['rules'][0] ), 2, '.', '' ) === '2750.00', '$2,450 plus $100 rounds up to $2,750' );
+
+$dime = artpal_test_tier_rules( array( array( '0', '', '0', 'percent', '0.10' ) ) );
+artpal_assert( number_format( artpal_pricing_adjust( 8.70, $dime['rules'][0] ), 2, '.', '' ) === '8.70', 'an amount already on the round step stays put' );
+artpal_assert( number_format( artpal_pricing_adjust( 8.71, $dime['rules'][0] ), 2, '.', '' ) === '8.80', '$8.71 rounds up to the next $0.10' );
+
+$round_only = artpal_test_tier_rules( array( array( '0', '', '0', 'percent', '5' ) ) );
+artpal_assert( number_format( artpal_pricing_adjust( 12, $round_only['rules'][0] ), 2, '.', '' ) === '15.00', 'a zero increase still rounds up' );
+artpal_assert( number_format( artpal_pricing_adjust( 15, $round_only['rules'][0] ), 2, '.', '' ) === '15.00', 'an exact multiple is not pushed to the next step' );
+
+$adjacent = artpal_test_tier_rules(
+	array(
+		array( '0', '100', '10', 'percent', '' ),
+		array( '100', '', '20', 'percent', '' ),
+	)
+);
+artpal_assert( empty( $adjacent['errors'] ) && count( $adjacent['rules'] ) === 2, 'adjacent tiers do not overlap' );
+artpal_assert( artpal_pricing_to_cents( artpal_pricing_adjust( 99.99, $adjacent['rules'][0] ) ) === 10999, '$99.99 is in the lower tier' );
+artpal_assert( number_format( artpal_pricing_adjust( 100, $adjacent['rules'][1] ), 2, '.', '' ) === '120.00', '$100 is in the next tier, not the lower one' );
+
+$overlap = artpal_test_tier_rules(
+	array(
+		array( '0', '150', '10', 'percent', '' ),
+		array( '100', '200', '10', 'percent', '' ),
+	)
+);
+artpal_assert( ! empty( $overlap['errors'] ) && empty( $overlap['rules'] ), 'overlapping tiers are rejected' );
+
+$negative = artpal_test_tier_rules( array( array( '0', '', '-5', 'flat', '' ) ) );
+artpal_assert( ! empty( $negative['errors'] ) && empty( $negative['rules'] ), 'a negative increase is rejected' );
+
+$same_end = artpal_test_tier_rules( array( array( '100', '100', '10', 'percent', '' ) ) );
+artpal_assert( ! empty( $same_end['errors'] ), 'Up to must be higher than From' );
+
+$blank_row = artpal_pricing_parse_rules(
+	array(
+		array( 'min' => '', 'max' => '', 'amount' => '', 'mode' => 'percent', 'round' => '' ),
+		array( 'min' => '0', 'max' => '', 'amount' => '10', 'mode' => 'flat', 'round' => '' ),
+	)
+);
+artpal_assert( empty( $blank_row['errors'] ) && count( $blank_row['rules'] ) === 1, 'a blank tier row is ignored' );
+artpal_assert( ! empty( artpal_pricing_parse_rules( array() )['errors'] ), 'no tiers is an error' );
+
+$half = artpal_test_tier_rules(
+	array(
+		array( '0', '100', '50', 'percent', '' ),
+		array( '100', '', '50', 'percent', '' ),
+	)
+);
+artpal_test_reset();
+artpal_test_seed_post( 90, array( 5 ), '90', '0', 'Ninety' );
+artpal_test_seed_post( 100, array( 5 ), '100', '0', 'One hundred' );
+$once = artpal_pricing_build_plan( 'price', $half['rules'], false );
+$once_new = array();
+foreach ( $once['rows'] as $row ) {
+	$once_new[ $row['post_id'] ] = number_format( $row['new'], 2, '.', '' );
+}
+artpal_assert( $once_new[90] === '135.00', 'a price is raised by the tier it is in now, one time' );
+artpal_assert( $once_new[90] !== '202.50', 'a raised price is not fed into the next tier' );
+artpal_assert( $once_new[100] === '150.00', 'the boundary price uses the higher tier' );
+
+artpal_test_reset();
+artpal_test_seed_post( 101, array( 5 ), '10', '0', 'Small study' );
+artpal_test_seed_post( 102, array( 5 ), '95', '0', 'Medium' );
+artpal_test_seed_post( 103, array( 5 ), '1000', '0', 'Large' );
+artpal_test_seed_post( 104, array( 5 ), '2450', '0', 'Huge' );
+artpal_test_seed_post( 105, array( 5, 6 ), '80', '0', 'Held back' );
+artpal_test_seed_post( 106, array( 5 ), '60', '0', 'Draft sketch' );
+$GLOBALS['artpal_test']['posts'][106]['post_status'] = 'draft';
+artpal_test_seed_post( 107, array( 5 ), '70', '0', 'Private study' );
+$GLOBALS['artpal_test']['posts'][107]['post_status'] = 'private';
+artpal_test_seed_post( 108, array( 5 ), '60', '0', 'Trashed' );
+$GLOBALS['artpal_test']['posts'][108]['post_status'] = 'trash';
+artpal_test_seed_post( 109, array( 3 ), '10', '0', 'Sold piece' );
+artpal_test_seed_post( 110, array( 5, 3 ), '10', '0', 'Sold and available' );
+artpal_test_seed_post( 111, array( 99 ), '10', '0', 'Not for sale' );
+artpal_test_seed_post( 112, array( 5 ), null, '0', 'Ask me' );
+artpal_test_seed_post( 113, array( 5 ), '0', '0', 'Zero' );
+
+$tiers = artpal_test_tier_rules(
+	array(
+		array( '0', '50', '30', 'percent', '5' ),
+		array( '50', '500', '20', 'percent', '5' ),
+		array( '500', '2000', '20', 'percent', '100' ),
+		array( '2000', '', '100', 'flat', '250' ),
+	)
+);
+artpal_assert( empty( $tiers['errors'] ) && count( $tiers['rules'] ) === 4, 'four price tiers parse' );
+$catalog = artpal_pricing_build_plan( 'price', $tiers['rules'], false );
+$catalog_new = array();
+$catalog_ids = array();
+foreach ( $catalog['rows'] as $row ) {
+	$catalog_new[ $row['post_id'] ] = number_format( $row['new'], 2, '.', '' );
+	$catalog_ids[] = $row['post_id'];
+}
+artpal_assert( $catalog_ids === array( 101, 106, 107, 105, 102, 103, 104 ), 'changes are sorted by the current price' );
+artpal_assert( $catalog_new[101] === '15.00', 'catalog $10 becomes $15' );
+artpal_assert( $catalog_new[102] === '115.00', 'catalog $95 becomes $115' );
+artpal_assert( $catalog_new[103] === '1200.00', 'catalog $1,000 becomes $1,200 and not $1,300' );
+artpal_assert( $catalog_new[104] === '2750.00', 'catalog $2,450 becomes $2,750' );
+artpal_assert( $catalog_new[105] === '100.00', 'a sale-disabled unsold piece is included' );
+artpal_assert( $catalog['rows'][3]['status_label'] === 'Disabled', 'the preview names a sale-disabled piece' );
+artpal_assert( $catalog_new[106] === '75.00' && $catalog['rows'][1]['post_status'] === 'draft', 'a draft in Available is included' );
+artpal_assert( $catalog_new[107] === '85.00' && $catalog['rows'][2]['post_status'] === 'private', 'a private post in Available is included' );
+artpal_assert( ! isset( $catalog_new[108] ) && ! isset( $catalog_new[109] ) && ! isset( $catalog_new[110] ) && ! isset( $catalog_new[111] ), 'trash, sold, and other posts are left out' );
+artpal_assert( ! isset( $catalog_new[112] ) && (int) $catalog['no_value'] === 1, 'an unsold post with no price is skipped' );
+artpal_assert( ! isset( $catalog_new[113] ) && (int) $catalog['unchanged'] === 1, 'a zero price that is already rounded is unchanged' );
+artpal_assert( number_format( $catalog['total_before'], 2, '.', '' ) === '3765.00', 'preview total before is the sum of the changes' );
+artpal_assert( number_format( $catalog['total_after'], 2, '.', '' ) === '4340.00', 'preview total after is the sum of the new prices' );
+artpal_assert( artpal_pricing_format_percent( $catalog['total_before'], $catalog['total_after'] ) === '15.3%', 'average increase covers the changed items' );
+$same_catalog = artpal_pricing_build_plan( 'price', $tiers['rules'], false );
+artpal_assert( $same_catalog['fingerprint'] === $catalog['fingerprint'], 'the same catalog previews to the same fingerprint' );
+
+$forged = artpal_pricing_commit_plan(
+	array(
+		'field'        => 'price',
+		'rows'         => array(
+			array( 'post_id' => 109, 'old' => 10, 'new' => 99 ),
+		),
+		'total_before' => 10,
+		'total_after'  => 99,
+	)
+);
+artpal_assert( null === $forged && get_post_meta( 109, 'artpal_price', true ) === '10', 'commit will not reprice a sold post' );
+artpal_assert( get_option( 'artpal_last_price_run', 'missing' ) === 'missing', 'a refused commit does not store an undo snapshot' );
+
+update_post_meta( 101, 'artpal_price', '12' );
+$stale = artpal_pricing_apply( 'price', $tiers['rules'], false, $catalog['fingerprint'] );
+artpal_assert( $stale['ok'] === false, 'a stale preview fingerprint does not apply' );
+artpal_assert( get_post_meta( 101, 'artpal_price', true ) === '12', 'a stale apply leaves the edited price' );
+artpal_assert( get_option( 'artpal_last_price_run', 'missing' ) === 'missing', 'a stale apply stores no run' );
+$fresh = artpal_pricing_build_plan( 'price', $tiers['rules'], false );
+artpal_assert( $fresh['fingerprint'] !== $catalog['fingerprint'], 'editing a price changes the fingerprint' );
+
+update_post_meta( 101, 'artpal_price', '10' );
+$ready  = artpal_pricing_build_plan( 'price', $tiers['rules'], false );
+$saved  = artpal_pricing_apply( 'price', $tiers['rules'], false, $ready['fingerprint'] );
+artpal_assert( $saved['ok'] === true && is_array( $saved['record'] ), 'a matching fingerprint applies' );
+artpal_assert( get_post_meta( 101, 'artpal_price', true ) === '15.00', 'apply writes a two-decimal price' );
+artpal_assert( get_post_meta( 103, 'artpal_price', true ) === '1200.00', 'apply writes $1,200.00 and not a rounded-up extra hundred' );
+artpal_assert( get_post_meta( 104, 'artpal_price', true ) === '2750.00', 'apply writes the rounded top-tier price' );
+artpal_assert( get_post_meta( 109, 'artpal_price', true ) === '10' && get_post_meta( 110, 'artpal_price', true ) === '10', 'apply does not change sold prices' );
+artpal_assert( get_post_meta( 108, 'artpal_price', true ) === '60' && get_post_meta( 111, 'artpal_price', true ) === '10', 'apply does not change trash or unrelated posts' );
+artpal_assert( artpal_get_price( 112 ) === null, 'apply does not invent a price for a post that has none' );
+artpal_assert( in_array( 6, artpal_get_category_ids( 105 ), true ) && in_array( 5, artpal_get_category_ids( 105 ), true ), 'repricing does not change categories' );
+
+update_post_meta( 102, 'artpal_price', '150.00' );
+$undo = artpal_pricing_undo_last_run();
+artpal_assert( $undo['missing'] === false && $undo['restored'] === 6 && $undo['skipped'] === 1, 'undo restores the run and skips a price edited since' );
+artpal_assert( get_post_meta( 101, 'artpal_price', true ) === '10.00', 'undo puts the original price back' );
+artpal_assert( get_post_meta( 102, 'artpal_price', true ) === '150.00', 'undo leaves the hand-edited price' );
+artpal_assert( get_post_meta( 103, 'artpal_price', true ) === '1000.00', 'undo restores a large price exactly' );
+artpal_assert( get_option( 'artpal_last_price_run', 'missing' ) === 'missing', 'undo removes the snapshot' );
+$undo_again = artpal_pricing_undo_last_run();
+artpal_assert( $undo_again['missing'] === true && $undo_again['restored'] === 0, 'a second undo has nothing to restore' );
+
+artpal_test_reset();
+artpal_test_seed_post( 301, array( 5 ), '20.40', '15', 'Cents' );
+$cents_rules = artpal_test_tier_rules( array( array( '0', '', '5.10', 'flat', '' ) ) );
+$cents_plan  = artpal_pricing_build_plan( 'price', $cents_rules['rules'], false );
+update_post_meta( 301, 'artpal_price', '30.00' );
+$cents_stale = artpal_pricing_apply( 'price', $cents_rules['rules'], false, $cents_plan['fingerprint'] );
+artpal_assert( $cents_stale['ok'] === false && get_post_meta( 301, 'artpal_price', true ) === '30.00', 'fingerprint mismatch aborts before writing' );
+update_post_meta( 301, 'artpal_price', '20.40' );
+$cents_plan = artpal_pricing_build_plan( 'price', $cents_rules['rules'], false );
+$cents_saved = artpal_pricing_apply( 'price', $cents_rules['rules'], false, $cents_plan['fingerprint'] );
+artpal_assert( $cents_saved['ok'] === true && get_post_meta( 301, 'artpal_price', true ) === '25.50', 'commit writes a 25.50-style price string' );
+artpal_assert( get_post_meta( 301, 'artpal_shipping', true ) === '15', 'a price increase does not change shipping' );
+
+artpal_test_reset();
+artpal_test_seed_post( 201, array( 5 ), '100', '15', 'Ships' );
+artpal_test_seed_post( 202, array( 5 ), '100', '0', 'Free' );
+artpal_test_seed_post( 203, array( 5 ), '100', null, 'Blank shipping' );
+artpal_test_seed_post( 204, array( 5 ), '100', '40', 'Far' );
+artpal_test_seed_post( 205, array( 3 ), '100', '10', 'Sold shipping' );
+$ship_rules = artpal_test_tier_rules( array( array( '0', '30', '5', 'flat', '' ) ) );
+$ship       = artpal_pricing_build_plan( 'shipping', $ship_rules['rules'], false );
+$ship_new   = array();
+foreach ( $ship['rows'] as $row ) {
+	$ship_new[ $row['post_id'] ] = number_format( $row['new'], 2, '.', '' );
+}
+artpal_assert( $ship_new === array( 201 => '20.00' ), 'shipping increases the amounts inside the range' );
+artpal_assert( (int) $ship['skipped_free'] === 2 && (int) $ship['unchanged'] === 1, 'free shipping is skipped unless asked for' );
+$ship_free = artpal_pricing_build_plan( 'shipping', $ship_rules['rules'], true );
+$ship_free_ids = array();
+foreach ( $ship_free['rows'] as $row ) {
+	$ship_free_ids[ $row['post_id'] ] = number_format( $row['new'], 2, '.', '' );
+}
+artpal_assert( $ship_free_ids === array( 202 => '5.00', 203 => '5.00', 201 => '20.00' ), 'free shipping can be raised when the box is checked' );
+artpal_assert( (int) $ship_free['skipped_free'] === 0 && isset( $ship_free_ids[202], $ship_free_ids[203] ), 'checking the box stops skipping free shipping' );
+$ship_saved = artpal_pricing_apply( 'shipping', $ship_rules['rules'], false, $ship['fingerprint'] );
+artpal_assert( $ship_saved['ok'] === true && get_post_meta( 201, 'artpal_shipping', true ) === '20.00', 'shipping apply writes artpal_shipping' );
+artpal_assert( get_post_meta( 202, 'artpal_shipping', true ) === '0' && get_post_meta( 203, 'artpal_shipping', true ) === '', 'free shipping meta is untouched by default' );
+artpal_assert( get_post_meta( 201, 'artpal_price', true ) === '100' && get_post_meta( 205, 'artpal_shipping', true ) === '10', 'shipping apply leaves prices and sold shipping alone' );
+
+$GLOBALS['artpal_test']['can'] = false;
+$prices_refused = false;
+try {
+	artpal_render_prices_page();
+} catch ( Exception $e ) {
+	$prices_refused = ( strpos( $e->getMessage(), 'permission' ) !== false );
+}
+artpal_assert( $prices_refused, 'prices page refuses users who cannot manage options' );
+
+$GLOBALS['artpal_test']['can'] = true;
+$GLOBALS['artpal_test']['nonce_ok'] = false;
+$_POST = array( 'artpal_prices_preview' => 'Preview' );
+$prices_nonce = false;
+try {
+	artpal_render_prices_page();
+} catch ( Exception $e ) {
+	$prices_nonce = ( strpos( $e->getMessage(), 'bad nonce' ) !== false );
+}
+artpal_assert( $prices_nonce, 'prices page checks the preview nonce' );
+
+artpal_test_reset();
+$GLOBALS['artpal_test']['can'] = true;
+$GLOBALS['artpal_test']['nonce_ok'] = true;
+artpal_test_seed_post( 401, array( 5 ), '10', '0', 'Small study' );
+$_POST = array(
+	'artpal_prices_preview' => 'Preview',
+	'artpal_field'          => 'price',
+	'artpal_rules'          => array(
+		array(
+			'min'    => '0',
+			'max'    => '100',
+			'amount' => '30',
+			'mode'   => 'percent',
+			'round'  => '5',
+		),
+	),
+);
+ob_start();
+artpal_render_prices_page();
+$preview_html = ob_get_clean();
+artpal_assert( strpos( $preview_html, 'Small study' ) !== false, 'preview lists the post title' );
+artpal_assert( strpos( $preview_html, '$10.00' ) !== false && strpos( $preview_html, '$15.00' ) !== false, 'preview shows the old price and the new price' );
+artpal_assert( strpos( $preview_html, '+$5.00' ) !== false, 'preview shows the difference' );
+artpal_assert( strpos( $preview_html, 'name="artpal_prices_apply"' ) !== false, 'preview offers apply' );
+artpal_assert( get_post_meta( 401, 'artpal_price', true ) === '10', 'preview does not save' );
+
+$page_rules = artpal_test_tier_rules( array( array( '0', '100', '30', 'percent', '5' ) ) );
+$page_plan  = artpal_pricing_build_plan( 'price', $page_rules['rules'], false );
+$_POST['artpal_prices_apply'] = 'Apply these prices';
+unset( $_POST['artpal_prices_preview'] );
+$_POST['artpal_fingerprint']  = $page_plan['fingerprint'];
+$_POST['artpal_include_free'] = '0';
+ob_start();
+artpal_render_prices_page();
+$applied_html = ob_get_clean();
+artpal_assert( strpos( $applied_html, 'Prices updated.' ) !== false, 'apply tells her the prices were saved' );
+artpal_assert( strpos( $applied_html, 'Total before' ) !== false && strpos( $applied_html, 'Total after' ) !== false, 'apply shows the before and after totals' );
+artpal_assert( get_post_meta( 401, 'artpal_price', true ) === '15.00', 'the prices page saves the previewed price' );
+artpal_assert( strpos( $applied_html, 'Undo last run' ) !== false, 'the last run can be undone from the page' );
+
+update_post_meta( 401, 'artpal_price', '12.00' );
+ob_start();
+artpal_render_prices_page();
+$stale_html = ob_get_clean();
+artpal_assert( strpos( $stale_html, 'nothing was saved' ) !== false, 'the page refuses a preview that is out of date' );
+artpal_assert( get_post_meta( 401, 'artpal_price', true ) === '12.00', 'an out-of-date apply does not write' );
+$kept_run = get_option( 'artpal_last_price_run' );
+artpal_assert( is_array( $kept_run ) && $kept_run['rows'][0]['new'] === '15.00', 'an out-of-date apply keeps the previous undo snapshot' );
+
+$_POST = array( 'artpal_prices_undo' => 'Undo last run' );
+ob_start();
+artpal_render_prices_page();
+$undo_html = ob_get_clean();
+artpal_assert( strpos( $undo_html, 'Left 1' ) !== false, 'the page says when undo skips an edited price' );
+artpal_assert( get_post_meta( 401, 'artpal_price', true ) === '12.00', 'undo from the page leaves the edited price' );
+artpal_assert( get_option( 'artpal_last_price_run', 'missing' ) === 'missing', 'undo from the page clears the snapshot' );
+$_POST = array();
+
 // Registration and source guards
 artpal_register_shortcodes();
 ds_ap_add_pages();
@@ -578,6 +975,16 @@ artpal_assert( in_array( 'artpal', $shortcodes, true ), '[artpal] shortcode is r
 artpal_assert( ! in_array( 'artpal=insert', $shortcodes, true ), '[artpal=insert] is not registered with add_shortcode' );
 artpal_assert( $content_priority === 10, 'the_content fallback runs at priority 10' );
 artpal_assert( $option_cap === 'manage_options', 'settings page capability is manage_options' );
+$prices_cap = null;
+$prices_cb  = null;
+foreach ( $GLOBALS['artpal_registered'] as $reg ) {
+	if ( $reg[0] === 'management_page' && $reg[2] === 'artpal-prices' ) {
+		$prices_cap = $reg[1];
+		$prices_cb  = $reg[3];
+	}
+}
+artpal_assert( $prices_cap === 'manage_options', 'prices page capability is manage_options' );
+artpal_assert( $prices_cb === 'artpal_render_prices_page', 'prices page callback is registered' );
 
 global $ds_ap_options_names;
 artpal_assert( in_array( 'ds_ap_notify_email', $ds_ap_options_names, true ), 'notify email option is registered for activation' );
@@ -622,7 +1029,7 @@ $GLOBALS['artpal_test']['options']['ds_ap_paypalbutton'] = $stale_button;
 $html = artpal_render_buy_now( 80 );
 artpal_assert( strpos( $html, 'src="' . $button_map['btn_buynow_LG.gif'] . '"' ) !== false, 'checkout uses the live button URL when the option is stale' );
 artpal_assert( strpos( $html, 'getflywheel.com' ) === false, 'checkout does not keep the stale button host' );
-artpal_assert( strpos( $plugin, 'Version: 2.1.0' ) !== false, 'plugin version is 2.1.0' );
+artpal_assert( strpos( $plugin, 'Version: 2.2.0' ) !== false, 'plugin version is 2.2.0' );
 artpal_assert( ! function_exists( 'artpal_maybe_handle_paypal_return' ) && ! function_exists( 'artpal_paypal_pdt_fetch' ), 'thank-you return and PDT handlers are gone' );
 artpal_assert( strpos( $plugin, "strcasecmp( \$status, 'Completed' )" ) === false, 'IPN does not require payment_status Completed' );
 artpal_assert( strpos( $plugin, 'curl_init' ) === false, 'verification uses the WordPress HTTP API, not curl' );

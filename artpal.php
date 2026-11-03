@@ -4,7 +4,7 @@ Plugin Name: ArtPal
 Plugin URI: http://freerobby.com/artpal
 Description: ArtPal allows artists to use WordPress to sell one-of-a-kind originals. When a piece sells, ArtPal stops showing a buy button, shows the sold HTML, and moves the post from the Available category to the Sold category.
 Author: Robby Grossman
-Version: 2.1.0
+Version: 2.2.0
 Requires at least: 6.0
 Requires PHP: 7.4
 Author URI: http://freerobby.com
@@ -41,6 +41,7 @@ add_action( 'add_meta_boxes', 'artpal_register_metabox' );
 add_action( 'save_post_post', 'artpal_save_metabox' );
 add_action( 'cli_init', 'artpal_register_cli' );
 require_once __DIR__ . '/artpal-options.php';
+require_once __DIR__ . '/artpal-pricing.php';
 
 ////////////////////////////////////////////////////////////////////////////////
 // Plugin Options Definitions
@@ -135,6 +136,7 @@ function ipn_page_url() {
 function ds_ap_add_pages() {
 	add_options_page( 'ArtPal', 'ArtPal', 'manage_options', 'artpal', 'ds_ap_options_page' );
 	add_management_page( 'ArtPal Items', 'ArtPal Items', 'edit_posts', 'artpal-items', 'ds_ap_manage_page' );
+	add_management_page( 'ArtPal Prices', 'ArtPal Prices', 'manage_options', 'artpal-prices', 'artpal_render_prices_page' );
 }
 
 function artpal_register_shortcodes() {
@@ -915,13 +917,13 @@ function artpal_paypal_ipn_postback( $request_body ) {
  */
 function artpal_version() {
 	if ( ! function_exists( 'get_file_data' ) ) {
-		return '2.1.0';
+		return '2.2.0';
 	}
 	$data = get_file_data( __FILE__, array( 'Version' => 'Version' ) );
 	if ( ! empty( $data['Version'] ) ) {
 		return (string) $data['Version'];
 	}
-	return '2.1.0';
+	return '2.2.0';
 }
 
 /**
